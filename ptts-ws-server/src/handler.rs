@@ -3,15 +3,13 @@ use crate::protocol::{TtsReply, TtsRequest, error_codes};
 use anyhow::Result;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
-use base64::Engine;
-use futures_util::{SinkExt, StreamExt};
 use ptts::tts_model::TTSState;
-use ptts::wav::Sample;
 use std::sync::Arc;
-use xn::Unquantized;
 
-pub async fn ws_handler(State(app): State<AppState>, ws: WebSocketUpgrade) -> Response {
+pub async fn ws_handler(
+    State(app): State<AppState>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
     async fn handle_socket(socket: WebSocket, app: AppState) {
         let result = match app {
             AppState::Cpu(s) => serve_b(socket, s).await,
@@ -26,6 +24,7 @@ pub async fn ws_handler(State(app): State<AppState>, ws: WebSocketUpgrade) -> Re
 }
 
 async fn serve_b<B: xn::Backend>(socket: WebSocket, app: Arc<AppStateB<B>>) -> Result<()> {
+    use futures_util::{SinkExt, StreamExt};
     let (mut tx, mut rx) = socket.split();
     let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -47,7 +46,7 @@ async fn serve_b<B: xn::Backend>(socket: WebSocket, app: Arc<AppStateB<B>>) -> R
 
 enum SessionState<B: xn::Backend> {
     Awaiting,
-    Ready { base_state: TTSState<Unquantized<f32, B>>, text_buffer: String, stream_id: u32 },
+    Ready { base_state: TTSState<xn::Unquantized<f32, B>>, text_buffer: String, stream_id: u32 },
 }
 
 async fn run_session<B: xn::Backend>(
@@ -55,6 +54,7 @@ async fn run_session<B: xn::Backend>(
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
 ) -> Result<()> {
+    use futures_util::StreamExt;
     let mut sess: SessionState<B> = SessionState::Awaiting;
 
     while let Some(msg) = stream.next().await {
@@ -128,7 +128,7 @@ async fn run_session<B: xn::Backend>(
 
 async fn flush_buffer<B: xn::Backend>(
     app: &Arc<AppStateB<B>>,
-    base_state: &TTSState<Unquantized<f32, B>>,
+    base_state: &TTSState<xn::Unquantized<f32, B>>,
     text_buffer: &mut String,
     stream_id: &mut u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
@@ -214,11 +214,14 @@ async fn handle_setup<B: xn::Backend>(
 
 async fn generate_one<B: xn::Backend>(
     app: &Arc<AppStateB<B>>,
-    base_state: &TTSState<Unquantized<f32, B>>,
+    base_state: &TTSState<xn::Unquantized<f32, B>>,
     text: &str,
     stream_id: u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
 ) -> Result<()> {
+    use base64::Engine;
+    use ptts::wav::Sample;
+
     let (prepared, frames_after_eos) = ptts::tts_model::prepare_text_prompt(text);
     let tokens = app.model.flow_lm.conditioner.tokenize(&prepared)?;
     let state = base_state.clone();
