@@ -1,6 +1,6 @@
 # wasm-pocket-tts
 
-WebAssembly build of [Pocket TTS](../pocket-tts/) — run text-to-speech directly in the browser.
+WebAssembly build of [Pocket TTS](../ptts/) — run text-to-speech directly in the browser.
 
 Try it online [here](https://laurentmazare.github.io/pocket-tts).
 
@@ -14,7 +14,7 @@ cargo install wasm-pack
 
 ## Build
 
-From the `wasm-pocket-tts/` directory:
+From the `ptts-wasm/` directory:
 
 ```bash
 make build
@@ -27,7 +27,7 @@ This runs `wasm-pack build` and copies `index.html` into `pkg/`.
 Serve the `pkg/` directory with any HTTP server, for example:
 
 ```bash
-cd wasm-pocket-tts/pkg
+cd ptts-wasm/pkg
 python3 -m http.server 8080
 ```
 

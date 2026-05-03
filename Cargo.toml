@@ -1,8 +1,8 @@
 [workspace]
 members = [
-  "pocket-tts",
-  "pocket-tts-pyo3",
-  "pocket-tts-wasm",
+  "ptts",
+  "ptts-pyo3",
+  "ptts-wasm",
 ]
 resolver = "3"
 
@@ -15,7 +15,7 @@ categories = ["science"]
 license = "MIT/Apache-2.0"
 
 [workspace.dependencies]
-ptts = { path = "pocket-tts", version = "0.1.10" }
+ptts = { path = "ptts", version = "0.1.11" }
 
 anyhow = "1"
 byteorder = "1"
