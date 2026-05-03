@@ -169,7 +169,7 @@ pub fn generate_chunks<B: xn::Backend>(
     temperature: f32,
     seed: u64,
     frames_after_eos: usize,
-    audio_tx: tokio::sync::mpsc::Sender<Vec<f32>>,
+    audio_tx: tokio::sync::mpsc::UnboundedSender<Vec<f32>>,
 ) -> Result<(), xn::Error> {
     let device = model.device();
     let num_tokens = tokens.len();
@@ -191,7 +191,7 @@ pub fn generate_chunks<B: xn::Backend>(
         while let Ok(latent) = latent_rx.recv() {
             let audio_chunk = decode_model.decode_latent(&latent, &mut mimi_state)?;
             let pcm = audio_chunk.narrow(0, ..1)?.contiguous()?.to_vec()?;
-            if decode_audio_tx.blocking_send(pcm).is_err() {
+            if decode_audio_tx.send(pcm).is_err() {
                 // Client gone — stop draining.
                 break;
             }
