@@ -3,7 +3,7 @@ use ptts::tts_model::{TTSConfig, TTSModel, TTSState};
 use std::collections::HashMap;
 use std::sync::Arc;
 use xn::nn::VB;
-use xn::{Tensor, Unquantized};
+use xn::{BackendQ, Tensor};
 
 pub const VOICES: &[&str] =
     &["alba", "marius", "javert", "jean", "fantine", "cosette", "eponine", "azelma"];
@@ -84,9 +84,9 @@ fn load_voice_embedding<B: xn::Backend>(
     }
 }
 
-pub struct AppStateB<B: xn::Backend> {
-    pub model: Arc<TTSModel<Unquantized<f32, B>>>,
-    pub voices: HashMap<String, Tensor<f32, B>>,
+pub struct AppStateB<Q: BackendQ> {
+    pub model: Arc<TTSModel<Q>>,
+    pub voices: HashMap<String, Tensor<Q::T, Q::B>>,
     pub max_seq_len: usize,
     pub temperature: f32,
     pub seed_base: u64,
@@ -96,17 +96,27 @@ pub struct AppStateB<B: xn::Backend> {
 
 #[derive(Clone)]
 pub enum AppState {
-    Cpu(Arc<AppStateB<xn::CpuDevice>>),
+    Cpu(Arc<AppStateB<xn::Unquantized<f32, xn::CpuDevice>>>),
+    Q80(Arc<AppStateB<xn::quantized::Q80F32>>),
+    Q81(Arc<AppStateB<xn::quantized::Q81F32>>),
+    Q8k(Arc<AppStateB<xn::quantized::Q8kF32>>),
+    Q6k(Arc<AppStateB<xn::quantized::Q6kF32>>),
+    Q50(Arc<AppStateB<xn::quantized::Q50F32>>),
+    Q51(Arc<AppStateB<xn::quantized::Q51F32>>),
+    Q5k(Arc<AppStateB<xn::quantized::Q5kF32>>),
+    Q40(Arc<AppStateB<xn::quantized::Q40F32>>),
+    Q41(Arc<AppStateB<xn::quantized::Q41F32>>),
+    Q4k(Arc<AppStateB<xn::quantized::Q4kF32>>),
     #[cfg(feature = "cuda")]
-    Cuda(Arc<AppStateB<xn::CudaDevice>>),
+    Cuda(Arc<AppStateB<xn::Unquantized<half::bf16, xn::CudaDevice>>>),
 }
 
-pub fn load_pocket_tts<B: xn::Backend>(
+pub fn load_pocket_tts<Q: BackendQ>(
     temperature: f32,
     seed_base: u64,
     max_seq_len: usize,
-    dev: B,
-) -> Result<AppStateB<B>> {
+    dev: Q::B,
+) -> Result<AppStateB<Q>> {
     use hf_hub::{Repo, RepoType, api::sync::Api};
     tracing::info!(repo_id = %REPO_ID, "downloading model artifacts");
     let api = Api::new()?;
@@ -115,14 +125,19 @@ pub fn load_pocket_tts<B: xn::Backend>(
     tracing::info!(?model_path, "model weights ready");
     let tokenizer_path = repo.get("tokenizer.model").map_err(anyhow::Error::from)?;
 
-    let mut voices = HashMap::new();
+    let mut voices: HashMap<String, Tensor<Q::T, Q::B>> = HashMap::new();
     for &voice in VOICES {
         let voice_file = format!("embeddings/{voice}.safetensors");
         match repo.get(&voice_file) {
             Ok(voice_path) => match load_voice_embedding(&voice_path, &dev) {
-                Ok(emb) => {
-                    voices.insert(voice.to_string(), emb);
-                }
+                Ok(emb) => match emb.to::<Q::T>() {
+                    Ok(emb) => {
+                        voices.insert(voice.to_string(), emb);
+                    }
+                    Err(e) => {
+                        tracing::warn!(?voice, error = %e, "failed to convert voice embedding")
+                    }
+                },
                 Err(e) => tracing::warn!(?voice, error = %e, "failed to load voice embedding"),
             },
             Err(e) => tracing::warn!(?voice, error = %e, "failed to download voice embedding"),
@@ -136,8 +151,15 @@ pub fn load_pocket_tts<B: xn::Backend>(
         .with_context(|| format!("failed to open tokenizer at {tokenizer_path}"))?;
     let tokenizer = SpTokenizer(sp);
 
-    let vb = VB::load_with_key_map(&[&model_path], dev, remap_key)?.root();
-    let model = TTSModel::load(&vb, Box::new(tokenizer), &cfg)?;
+    let vb = if model_path.extension().and_then(|v| v.to_str()) == Some("gguf") {
+        let reader = std::fs::File::open(&model_path)?;
+        let reader = std::io::BufReader::new(reader);
+        VB::load_gguf_with_key_map(reader, dev, remap_key)?
+    } else {
+        VB::load_with_key_map(&[&model_path], dev, remap_key)?
+    };
+    let vb = vb.root();
+    let model: TTSModel<Q> = TTSModel::load(&vb, Box::new(tokenizer), &cfg)?;
     vb.check_all_used_with_ignore(|v| {
         v == "flow_lm.condition_provider.conditioners.speaker_wavs.learnt_padding"
             || v.starts_with("mimi.encoder")
@@ -162,9 +184,9 @@ pub fn load_pocket_tts<B: xn::Backend>(
 
 /// Run a single text-to-audio generation, sending each decoded PCM chunk as it
 /// becomes available. Designed to be called inside `tokio::task::spawn_blocking`.
-pub fn generate_chunks<B: xn::Backend>(
-    model: Arc<TTSModel<Unquantized<f32, B>>>,
-    mut state: TTSState<Unquantized<f32, B>>,
+pub fn generate_chunks<Q: BackendQ>(
+    model: Arc<TTSModel<Q>>,
+    mut state: TTSState<Q>,
     tokens: Vec<u32>,
     temperature: f32,
     seed: u64,
@@ -181,9 +203,10 @@ pub fn generate_chunks<B: xn::Backend>(
 
     let ldim = model.flow_lm.ldim;
     let nan_data = vec![f32::NAN; ldim];
-    let mut prev_latent = Tensor::from_vec(nan_data, (1, 1, ldim), device)?;
+    let mut prev_latent: Tensor<Q::T, Q::B> =
+        Tensor::from_vec(nan_data, (1, 1, ldim), device)?.to::<Q::T>()?;
 
-    let (latent_tx, latent_rx) = std::sync::mpsc::channel::<Tensor<f32, B>>();
+    let (latent_tx, latent_rx) = std::sync::mpsc::channel::<Tensor<Q::T, Q::B>>();
 
     let decode_model = Arc::clone(&model);
     let decode_audio_tx = audio_tx.clone();

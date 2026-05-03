@@ -12,9 +12,19 @@ pub async fn ws_handler(
 ) -> axum::response::Response {
     async fn handle_socket(socket: WebSocket, app: AppState) {
         let result = match app {
-            AppState::Cpu(s) => serve_b(socket, s).await,
+            AppState::Cpu(s) => serve_q(socket, s).await,
+            AppState::Q80(s) => serve_q(socket, s).await,
+            AppState::Q81(s) => serve_q(socket, s).await,
+            AppState::Q8k(s) => serve_q(socket, s).await,
+            AppState::Q6k(s) => serve_q(socket, s).await,
+            AppState::Q50(s) => serve_q(socket, s).await,
+            AppState::Q51(s) => serve_q(socket, s).await,
+            AppState::Q5k(s) => serve_q(socket, s).await,
+            AppState::Q40(s) => serve_q(socket, s).await,
+            AppState::Q41(s) => serve_q(socket, s).await,
+            AppState::Q4k(s) => serve_q(socket, s).await,
             #[cfg(feature = "cuda")]
-            AppState::Cuda(s) => serve_b(socket, s).await,
+            AppState::Cuda(s) => serve_q(socket, s).await,
         };
         if let Err(e) = result {
             tracing::error!(error = %e, "ws session terminated");
@@ -23,7 +33,7 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, app))
 }
 
-async fn serve_b<B: xn::Backend>(socket: WebSocket, app: Arc<AppStateB<B>>) -> Result<()> {
+async fn serve_q<Q: xn::BackendQ>(socket: WebSocket, app: Arc<AppStateB<Q>>) -> Result<()> {
     use futures_util::{SinkExt, StreamExt};
     let (mut tx, mut rx) = socket.split();
     let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -44,18 +54,18 @@ async fn serve_b<B: xn::Backend>(socket: WebSocket, app: Arc<AppStateB<B>>) -> R
     outcome
 }
 
-enum SessionState<B: xn::Backend> {
+enum SessionState<Q: xn::BackendQ> {
     Awaiting,
-    Ready { base_state: TTSState<xn::Unquantized<f32, B>>, text_buffer: String, stream_id: u32 },
+    Ready { base_state: TTSState<Q>, text_buffer: String, stream_id: u32 },
 }
 
-async fn run_session<B: xn::Backend>(
-    app: Arc<AppStateB<B>>,
+async fn run_session<Q: xn::BackendQ>(
+    app: Arc<AppStateB<Q>>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
 ) -> Result<()> {
     use futures_util::StreamExt;
-    let mut sess: SessionState<B> = SessionState::Awaiting;
+    let mut sess: SessionState<Q> = SessionState::Awaiting;
 
     while let Some(msg) = stream.next().await {
         let msg = msg?;
@@ -126,9 +136,9 @@ async fn run_session<B: xn::Backend>(
     Ok(())
 }
 
-async fn flush_buffer<B: xn::Backend>(
-    app: &Arc<AppStateB<B>>,
-    base_state: &TTSState<xn::Unquantized<f32, B>>,
+async fn flush_buffer<Q: xn::BackendQ>(
+    app: &Arc<AppStateB<Q>>,
+    base_state: &TTSState<Q>,
     text_buffer: &mut String,
     stream_id: &mut u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
@@ -146,15 +156,15 @@ async fn flush_buffer<B: xn::Backend>(
     Ok(())
 }
 
-async fn handle_setup<B: xn::Backend>(
-    app: &Arc<AppStateB<B>>,
+async fn handle_setup<Q: xn::BackendQ>(
+    app: &Arc<AppStateB<Q>>,
     model_name: String,
     output_format: String,
     voice: Option<String>,
     voice_id: Option<String>,
     voice_emb: Option<String>,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
-) -> Result<Option<SessionState<B>>> {
+) -> Result<Option<SessionState<Q>>> {
     if voice_emb.as_deref().is_some_and(|s| !s.is_empty()) {
         send_error(
             reply_tx,
@@ -212,9 +222,9 @@ async fn handle_setup<B: xn::Backend>(
     Ok(Some(SessionState::Ready { base_state, text_buffer: String::new(), stream_id: 0 }))
 }
 
-async fn generate_one<B: xn::Backend>(
-    app: &Arc<AppStateB<B>>,
-    base_state: &TTSState<xn::Unquantized<f32, B>>,
+async fn generate_one<Q: xn::BackendQ>(
+    app: &Arc<AppStateB<Q>>,
+    base_state: &TTSState<Q>,
     text: &str,
     stream_id: u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,

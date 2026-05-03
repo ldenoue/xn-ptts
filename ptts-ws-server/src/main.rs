@@ -29,6 +29,12 @@ struct Args {
     /// Use the CUDA backend (requires building with --features cuda).
     #[arg(long, default_value_t = false)]
     cuda: bool,
+
+    /// Quantization for the flow_lm transformer linear weights.
+    /// One of: q8|q8_0, q8_1, q8k, q6k, q5|q5_0, q5_1, q5k, q4|q4_0, q4_1, q4k.
+    /// CPU only.
+    #[arg(long)]
+    quant: Option<String>,
 }
 
 fn init_tracing() {
@@ -65,15 +71,22 @@ async fn main() -> Result<()> {
 #[cfg(feature = "cuda")]
 fn build_app_state(args: &Args) -> Result<model::AppState> {
     if args.cuda {
+        if args.quant.is_some() {
+            anyhow::bail!("--quant cannot be combined with --cuda; quantization is CPU-only");
+        }
         let dev = xn::CudaDevice::new(0)?;
         unsafe {
             dev.disable_event_tracking();
         }
-        let s = model::load_pocket_tts(args.temperature, args.seed, args.max_seq_len, dev)?;
+        let s = model::load_pocket_tts::<xn::Unquantized<half::bf16, _>>(
+            args.temperature,
+            args.seed,
+            args.max_seq_len,
+            dev,
+        )?;
         Ok(model::AppState::Cuda(Arc::new(s)))
     } else {
-        let s = model::load_pocket_tts(args.temperature, args.seed, args.max_seq_len, xn::CPU)?;
-        Ok(model::AppState::Cpu(Arc::new(s)))
+        build_cpu_state(args)
     }
 }
 
@@ -82,6 +95,115 @@ fn build_app_state(args: &Args) -> Result<model::AppState> {
     if args.cuda {
         anyhow::bail!("--cuda requested but binary was not built with --features cuda");
     }
-    let s = model::load_pocket_tts(args.temperature, args.seed, args.max_seq_len, xn::CPU)?;
-    Ok(model::AppState::Cpu(Arc::new(s)))
+    build_cpu_state(args)
+}
+
+fn build_cpu_state(args: &Args) -> Result<model::AppState> {
+    use model::AppState;
+    let temp = args.temperature;
+    let seed = args.seed;
+    let mlen = args.max_seq_len;
+    let state = match args.quant.as_deref() {
+        None => {
+            tracing::info!("using cpu backend (unquantized f32)");
+            AppState::Cpu(Arc::new(model::load_pocket_tts::<xn::Unquantized<f32, _>>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q8" | "q8_0") => {
+            tracing::info!("using cpu q8_0 backend");
+            AppState::Q80(Arc::new(model::load_pocket_tts::<xn::quantized::Q80F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q8_1") => {
+            tracing::info!("using cpu q8_1 backend");
+            AppState::Q81(Arc::new(model::load_pocket_tts::<xn::quantized::Q81F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q8k") => {
+            tracing::info!("using cpu q8k backend");
+            AppState::Q8k(Arc::new(model::load_pocket_tts::<xn::quantized::Q8kF32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q6k") => {
+            tracing::info!("using cpu q6k backend");
+            AppState::Q6k(Arc::new(model::load_pocket_tts::<xn::quantized::Q6kF32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q5" | "q5_0") => {
+            tracing::info!("using cpu q5_0 backend");
+            AppState::Q50(Arc::new(model::load_pocket_tts::<xn::quantized::Q50F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q5_1") => {
+            tracing::info!("using cpu q5_1 backend");
+            AppState::Q51(Arc::new(model::load_pocket_tts::<xn::quantized::Q51F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q5k") => {
+            tracing::info!("using cpu q5k backend");
+            AppState::Q5k(Arc::new(model::load_pocket_tts::<xn::quantized::Q5kF32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q4" | "q4_0") => {
+            tracing::info!("using cpu q4_0 backend");
+            AppState::Q40(Arc::new(model::load_pocket_tts::<xn::quantized::Q40F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q4_1") => {
+            tracing::info!("using cpu q4_1 backend");
+            AppState::Q41(Arc::new(model::load_pocket_tts::<xn::quantized::Q41F32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some("q4k") => {
+            tracing::info!("using cpu q4k backend");
+            AppState::Q4k(Arc::new(model::load_pocket_tts::<xn::quantized::Q4kF32>(
+                temp,
+                seed,
+                mlen,
+                xn::CPU,
+            )?))
+        }
+        Some(other) => anyhow::bail!("unsupported --quant value '{other}'"),
+    };
+    Ok(state)
 }
