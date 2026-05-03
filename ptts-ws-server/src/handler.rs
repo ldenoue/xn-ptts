@@ -45,12 +45,14 @@ async fn serve_q<Q: xn::BackendQ>(socket: WebSocket, app: Arc<AppStateB<Q>>) -> 
                 break;
             }
         }
+        let _ = tx.close().await;
         Ok::<_, anyhow::Error>(())
     });
 
     let outcome = run_session(app, &mut rx, &reply_tx).await;
     drop(reply_tx);
     let _ = forwarder.await;
+    tracing::info!("websocket session ended");
     outcome
 }
 
@@ -129,10 +131,12 @@ async fn run_session<Q: xn::BackendQ>(
             ) => {
                 flush_buffer(&app, base_state, text_buffer, stream_id, reply_tx).await?;
                 let _ = reply_tx.send(TtsReply::EndOfStream);
+                tracing::info!("websocket stream closed by client (end of stream)");
                 return Ok(());
             }
         }
     }
+    tracing::info!("websocket stream closed by client");
     Ok(())
 }
 
@@ -201,10 +205,12 @@ async fn handle_setup<Q: xn::BackendQ>(
             return Ok(None);
         }
     };
+    tracing::info!(?voice_name, "starting new TTS session");
     if let Err(e) = app.model.prompt_audio(&mut base_state, voice_emb_t) {
         send_error(reply_tx, error_codes::INTERNAL, format!("prompt_audio failed: {e}"))?;
         return Ok(None);
     }
+    tracing::info!(?voice_name, "prompted voice embedding");
     let request_id = uuid::Uuid::new_v4().to_string();
     let model_name =
         if model_name.is_empty() { "kyutai/pocket-tts".to_string() } else { model_name };
