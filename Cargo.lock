@@ -1551,6 +1551,7 @@ dependencies = [
  "bytemuck",
  "clap",
  "futures-util",
+ "half",
  "hf-hub",
  "ptts",
  "rand",
