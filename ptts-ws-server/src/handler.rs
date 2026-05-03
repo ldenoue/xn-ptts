@@ -25,10 +25,7 @@ pub async fn ws_handler(State(app): State<AppState>, ws: WebSocketUpgrade) -> Re
     ws.on_upgrade(move |socket| handle_socket(socket, app))
 }
 
-async fn serve_b<B>(socket: WebSocket, app: Arc<AppStateB<B>>) -> Result<()>
-where
-    B: xn::Backend,
-{
+async fn serve_b<B: xn::Backend>(socket: WebSocket, app: Arc<AppStateB<B>>) -> Result<()> {
     let (mut tx, mut rx) = socket.split();
     let (reply_tx, mut reply_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -53,14 +50,11 @@ enum SessionState<B: xn::Backend> {
     Ready { base_state: TTSState<Unquantized<f32, B>>, text_buffer: String, stream_id: u32 },
 }
 
-async fn run_session<B>(
+async fn run_session<B: xn::Backend>(
     app: Arc<AppStateB<B>>,
     stream: &mut futures_util::stream::SplitStream<WebSocket>,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
-) -> Result<()>
-where
-    B: xn::Backend,
-{
+) -> Result<()> {
     let mut sess: SessionState<B> = SessionState::Awaiting;
 
     while let Some(msg) = stream.next().await {
@@ -132,16 +126,13 @@ where
     Ok(())
 }
 
-async fn flush_buffer<B>(
+async fn flush_buffer<B: xn::Backend>(
     app: &Arc<AppStateB<B>>,
     base_state: &TTSState<Unquantized<f32, B>>,
     text_buffer: &mut String,
     stream_id: &mut u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
-) -> Result<()>
-where
-    B: xn::Backend + 'static,
-{
+) -> Result<()> {
     if text_buffer.is_empty() {
         return Ok(());
     }
@@ -155,7 +146,7 @@ where
     Ok(())
 }
 
-async fn handle_setup<B>(
+async fn handle_setup<B: xn::Backend>(
     app: &Arc<AppStateB<B>>,
     model_name: String,
     output_format: String,
@@ -163,10 +154,7 @@ async fn handle_setup<B>(
     voice_id: Option<String>,
     voice_emb: Option<String>,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
-) -> Result<Option<SessionState<B>>>
-where
-    B: xn::Backend + 'static,
-{
+) -> Result<Option<SessionState<B>>> {
     if voice_emb.as_deref().is_some_and(|s| !s.is_empty()) {
         send_error(
             reply_tx,
@@ -224,16 +212,13 @@ where
     Ok(Some(SessionState::Ready { base_state, text_buffer: String::new(), stream_id: 0 }))
 }
 
-async fn generate_one<B>(
+async fn generate_one<B: xn::Backend>(
     app: &Arc<AppStateB<B>>,
     base_state: &TTSState<Unquantized<f32, B>>,
     text: &str,
     stream_id: u32,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
-) -> Result<()>
-where
-    B: xn::Backend + 'static,
-{
+) -> Result<()> {
     let (prepared, frames_after_eos) = ptts::tts_model::prepare_text_prompt(text);
     let tokens = app.model.flow_lm.conditioner.tokenize(&prepared)?;
     let state = base_state.clone();
