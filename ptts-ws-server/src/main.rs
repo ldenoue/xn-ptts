@@ -47,12 +47,12 @@ async fn main() -> Result<()> {
     let app_state = build_app_state(&args)?;
 
     let app = Router::new()
-        .route("/api/tts_streaming", any(handler::ws_handler))
+        .route("/speech/tts", any(handler::ws_handler))
         .with_state(app_state)
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(&args.addr).await?;
-    tracing::info!(addr = %args.addr, "listening on /api/tts_streaming");
+    tracing::info!(addr = %args.addr, "listening on /speech/tts");
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;

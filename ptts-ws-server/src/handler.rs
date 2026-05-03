@@ -61,12 +61,7 @@ where
 
 enum SessionState<B: xn::Backend> {
     Awaiting,
-    Ready {
-        base_state: TTSState<Unquantized<f32, B>>,
-        rewrites: Vec<(String, String, bool)>,
-        text_buffer: String,
-        stream_id: u32,
-    },
+    Ready { base_state: TTSState<Unquantized<f32, B>>, text_buffer: String, stream_id: u32 },
 }
 
 async fn run_session<B>(
@@ -97,15 +92,7 @@ where
         match (&mut sess, req) {
             (
                 SessionState::Awaiting,
-                TtsRequest::Setup {
-                    model_name,
-                    output_format,
-                    voice,
-                    voice_id,
-                    voice_emb,
-                    rewrites,
-                    ..
-                },
+                TtsRequest::Setup { model_name, output_format, voice, voice_id, voice_emb, .. },
             ) => match handle_setup(
                 &app,
                 model_name,
@@ -113,7 +100,6 @@ where
                 voice,
                 voice_id,
                 voice_emb,
-                rewrites,
                 reply_tx,
             )
             .await?
@@ -141,17 +127,17 @@ where
                 text_buffer.push_str(&text);
             }
             (
-                SessionState::Ready { base_state, rewrites, text_buffer, stream_id },
+                SessionState::Ready { base_state, text_buffer, stream_id },
                 TtsRequest::Flush { flush_id },
             ) => {
-                flush_buffer(&app, base_state, rewrites, text_buffer, stream_id, reply_tx).await?;
+                flush_buffer(&app, base_state, text_buffer, stream_id, reply_tx).await?;
                 let _ = reply_tx.send(TtsReply::Flushed { flush_id }).await;
             }
             (
-                SessionState::Ready { base_state, rewrites, text_buffer, stream_id },
+                SessionState::Ready { base_state, text_buffer, stream_id },
                 TtsRequest::EndOfStream,
             ) => {
-                flush_buffer(&app, base_state, rewrites, text_buffer, stream_id, reply_tx).await?;
+                flush_buffer(&app, base_state, text_buffer, stream_id, reply_tx).await?;
                 let _ = reply_tx.send(TtsReply::EndOfStream).await;
                 return Ok(());
             }
@@ -163,7 +149,6 @@ where
 async fn flush_buffer<B>(
     app: &Arc<AppStateB<B>>,
     base_state: &TTSState<Unquantized<f32, B>>,
-    rewrites: &[(String, String, bool)],
     text_buffer: &mut String,
     stream_id: &mut u32,
     reply_tx: &mpsc::Sender<TtsReply>,
@@ -177,14 +162,13 @@ where
     let stream_id_now = *stream_id;
     *stream_id = stream_id.saturating_add(1);
     let text = std::mem::take(text_buffer);
-    if let Err(e) = generate_one(app, base_state, rewrites, &text, stream_id_now, reply_tx).await {
+    if let Err(e) = generate_one(app, base_state, &text, stream_id_now, reply_tx).await {
         tracing::warn!(error = %e, stream_id = stream_id_now, "generation failed");
         send_error(reply_tx, error_codes::INTERNAL, format!("generation failed: {e}")).await?;
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_setup<B>(
     app: &Arc<AppStateB<B>>,
     model_name: String,
@@ -192,7 +176,6 @@ async fn handle_setup<B>(
     voice: Option<String>,
     voice_id: Option<String>,
     voice_emb: Option<String>,
-    rewrites: Vec<(String, String, bool)>,
     reply_tx: &mpsc::Sender<TtsReply>,
 ) -> Result<Option<SessionState<B>>>
 where
@@ -220,8 +203,8 @@ where
         .as_deref()
         .filter(|s| !s.is_empty())
         .or(voice.as_deref().filter(|s| !s.is_empty()))
-        .unwrap_or("alba")
-        .to_string();
+        .unwrap_or("alba");
+    let voice_name = if voice_name == "default" { "alba" } else { voice_name }.to_string();
     let voice_emb_t = match app.voices.get(&voice_name) {
         Some(v) => v,
         None => {
@@ -256,13 +239,12 @@ where
     if reply_tx.send(ready).await.is_err() {
         anyhow::bail!("reply channel closed before ready");
     }
-    Ok(Some(SessionState::Ready { base_state, rewrites, text_buffer: String::new(), stream_id: 0 }))
+    Ok(Some(SessionState::Ready { base_state, text_buffer: String::new(), stream_id: 0 }))
 }
 
 async fn generate_one<B>(
     app: &Arc<AppStateB<B>>,
     base_state: &TTSState<Unquantized<f32, B>>,
-    rewrites: &[(String, String, bool)],
     text: &str,
     stream_id: u32,
     reply_tx: &mpsc::Sender<TtsReply>,
@@ -270,8 +252,7 @@ async fn generate_one<B>(
 where
     B: xn::Backend + 'static,
 {
-    let rewritten = apply_rewrites(text, rewrites);
-    let (prepared, frames_after_eos) = ptts::tts_model::prepare_text_prompt(&rewritten);
+    let (prepared, frames_after_eos) = ptts::tts_model::prepare_text_prompt(text);
     let tokens = app.model.flow_lm.conditioner.tokenize(&prepared)?;
     let state = base_state.clone();
     let model = Arc::clone(&app.model);
@@ -307,39 +288,4 @@ async fn send_error(tx: &mpsc::Sender<TtsReply>, code: u32, message: String) -> 
         .await
         .map_err(|_| anyhow::anyhow!("reply channel closed"))?;
     Ok(())
-}
-
-fn apply_rewrites(text: &str, rewrites: &[(String, String, bool)]) -> String {
-    let mut s = text.to_string();
-    for (from, to, case_sensitive) in rewrites {
-        if from.is_empty() {
-            continue;
-        }
-        s = if *case_sensitive {
-            s.replace(from.as_str(), to.as_str())
-        } else {
-            ascii_case_insensitive_replace(&s, from, to)
-        };
-    }
-    s
-}
-
-fn ascii_case_insensitive_replace(haystack: &str, needle: &str, replacement: &str) -> String {
-    let mut result = String::with_capacity(haystack.len());
-    let needle_len = needle.len();
-    let mut i = 0;
-    while i < haystack.len() {
-        if i + needle_len <= haystack.len()
-            && haystack.is_char_boundary(i + needle_len)
-            && haystack[i..i + needle_len].eq_ignore_ascii_case(needle)
-        {
-            result.push_str(replacement);
-            i += needle_len;
-        } else {
-            let ch = haystack[i..].chars().next().unwrap();
-            result.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    result
 }

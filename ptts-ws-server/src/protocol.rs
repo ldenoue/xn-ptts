@@ -17,8 +17,6 @@ pub enum TtsRequest {
         voice: Option<String>,
         voice_id: Option<String>,
         voice_emb: Option<String>,
-        #[serde(default)]
-        rewrites: Vec<(String, String, bool)>,
     },
     Text {
         text: String,
