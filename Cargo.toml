@@ -3,6 +3,7 @@ members = [
   "ptts",
   "ptts-pyo3",
   "ptts-wasm",
+  "ptts-ws-server",
 ]
 resolver = "3"
 
@@ -18,7 +19,11 @@ license = "MIT/Apache-2.0"
 ptts = { path = "ptts", version = "0.1.11" }
 
 anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["ws", "tokio", "http1", "macros"] }
+base64 = "0.22"
+bytemuck = "1"
 clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
 getrandom = "0.3"
 half = { version = "2.7.1", features = ["num-traits"] }
 hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
@@ -31,11 +36,14 @@ sentencepiece = "0.13.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 symphonia = { version = "0.5.3", features = ["all"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1.44"
 tracing-chrome = "0.7.2"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
 wasm-bindgen = "0.2"
-xn = "0.1.11" 
+xn = "0.1.11"
 
 [profile.release]
 debug = true
