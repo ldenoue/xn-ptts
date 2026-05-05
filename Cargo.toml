@@ -22,12 +22,14 @@ anyhow = "1"
 axum = { version = "0.8", default-features = false, features = ["ws", "tokio", "http1", "macros"] }
 base64 = "0.22"
 bytemuck = "1"
+byteorder = "1.5.0"
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 getrandom = "0.3"
 half = { version = "2.7.1", features = ["num-traits"] }
 hf-hub = { version = "0.5", default-features = false, features = ["ureq"] }
 js-sys = "0.3"
+kaudio = "0.2.1"
 libc = "0.2"
 rand = { version = "0.9.0", default-features = false }
 rand_distr = "0.5.0"
