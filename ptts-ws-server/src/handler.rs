@@ -1,3 +1,4 @@
+use crate::encoder::{Encoder, Format};
 use crate::model::{AppState, AppStateB, generate_chunks};
 use crate::protocol::{TtsReply, TtsRequest, error_codes};
 use anyhow::Result;
@@ -58,7 +59,7 @@ async fn serve_q<Q: xn::BackendQ>(socket: WebSocket, app: Arc<AppStateB<Q>>) -> 
 
 enum SessionState<Q: xn::BackendQ> {
     Awaiting,
-    Ready { base_state: TTSState<Q>, text_buffer: String, stream_id: u32 },
+    Ready { base_state: TTSState<Q>, text_buffer: String, stream_id: u32, encoder: Box<Encoder> },
 }
 
 async fn run_session<Q: xn::BackendQ>(
@@ -119,17 +120,17 @@ async fn run_session<Q: xn::BackendQ>(
                 text_buffer.push_str(&text);
             }
             (
-                SessionState::Ready { base_state, text_buffer, stream_id },
+                SessionState::Ready { base_state, text_buffer, stream_id, encoder },
                 TtsRequest::Flush { flush_id },
             ) => {
-                flush_buffer(&app, base_state, text_buffer, stream_id, reply_tx).await?;
+                flush_buffer(&app, base_state, text_buffer, stream_id, encoder, reply_tx).await?;
                 let _ = reply_tx.send(TtsReply::Flushed { flush_id });
             }
             (
-                SessionState::Ready { base_state, text_buffer, stream_id },
+                SessionState::Ready { base_state, text_buffer, stream_id, encoder },
                 TtsRequest::EndOfStream,
             ) => {
-                flush_buffer(&app, base_state, text_buffer, stream_id, reply_tx).await?;
+                flush_buffer(&app, base_state, text_buffer, stream_id, encoder, reply_tx).await?;
                 let _ = reply_tx.send(TtsReply::EndOfStream);
                 tracing::info!("websocket stream closed by client (end of stream)");
                 return Ok(());
@@ -145,6 +146,7 @@ async fn flush_buffer<Q: xn::BackendQ>(
     base_state: &TTSState<Q>,
     text_buffer: &mut String,
     stream_id: &mut u32,
+    encoder: &mut Encoder,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
 ) -> Result<()> {
     if text_buffer.is_empty() {
@@ -153,7 +155,7 @@ async fn flush_buffer<Q: xn::BackendQ>(
     let stream_id_now = *stream_id;
     *stream_id = stream_id.saturating_add(1);
     let text = std::mem::take(text_buffer);
-    if let Err(e) = generate_one(app, base_state, &text, stream_id_now, reply_tx).await {
+    if let Err(e) = generate_one(app, base_state, &text, stream_id_now, encoder, reply_tx).await {
         tracing::warn!(error = %e, stream_id = stream_id_now, "generation failed");
         send_error(reply_tx, error_codes::INTERNAL, format!("generation failed: {e}"))?;
     }
@@ -177,14 +179,24 @@ async fn handle_setup<Q: xn::BackendQ>(
         )?;
         return Ok(None);
     }
-    if output_format != "pcm_s16_le" && output_format != "pcm" {
-        send_error(
-            reply_tx,
-            error_codes::BAD_REQUEST,
-            format!("unsupported output_format '{output_format}'; only 'pcm' is accepted"),
-        )?;
-        return Ok(None);
-    }
+    let format = match output_format.parse::<Format>() {
+        Ok(f) => f,
+        Err(e) => {
+            send_error(reply_tx, error_codes::BAD_REQUEST, format!("{e}"))?;
+            return Ok(None);
+        }
+    };
+    let encoder = match Encoder::new(format, app.frame_size as usize, app.sample_rate as usize) {
+        Ok(e) => e,
+        Err(e) => {
+            send_error(
+                reply_tx,
+                error_codes::INTERNAL,
+                format!("failed to create audio encoder: {e}"),
+            )?;
+            return Ok(None);
+        }
+    };
     let voice_name = voice_id
         .as_deref()
         .filter(|s| !s.is_empty())
@@ -225,7 +237,20 @@ async fn handle_setup<Q: xn::BackendQ>(
     if reply_tx.send(ready).is_err() {
         anyhow::bail!("reply channel closed before ready");
     }
-    Ok(Some(SessionState::Ready { base_state, text_buffer: String::new(), stream_id: 0 }))
+    if let Some(header) = encoder.header() {
+        use base64::Engine;
+        let audio = base64::engine::general_purpose::STANDARD.encode(header);
+        let header_reply = TtsReply::Audio { audio, start_s: 0.0, stop_s: 0.0, stream_id: 0 };
+        if reply_tx.send(header_reply).is_err() {
+            anyhow::bail!("reply channel closed before header");
+        }
+    }
+    Ok(Some(SessionState::Ready {
+        base_state,
+        text_buffer: String::new(),
+        stream_id: 0,
+        encoder: Box::new(encoder),
+    }))
 }
 
 async fn generate_one<Q: xn::BackendQ>(
@@ -233,10 +258,10 @@ async fn generate_one<Q: xn::BackendQ>(
     base_state: &TTSState<Q>,
     text: &str,
     stream_id: u32,
+    encoder: &mut Encoder,
     reply_tx: &tokio::sync::mpsc::UnboundedSender<TtsReply>,
 ) -> Result<()> {
     use base64::Engine;
-    use ptts::wav::Sample;
 
     let (prepared, frames_after_eos) = ptts::tts_model::prepare_text_prompt(text);
     let tokens = app.model.flow_lm.conditioner.tokenize(&prepared)?;
@@ -250,17 +275,18 @@ async fn generate_one<Q: xn::BackendQ>(
         generate_chunks(model, state, tokens, temperature, seed, frames_after_eos, audio_tx)
     });
 
-    let sample_rate = app.sample_rate as f64;
-    let mut samples_emitted: usize = 0;
     while let Some(pcm) = audio_rx.recv().await {
-        let n = pcm.len();
-        let pcm_i16: Vec<i16> = pcm.iter().map(|s| s.to_i16()).collect();
-        let bytes: &[u8] = bytemuck::cast_slice(&pcm_i16);
-        let audio = base64::engine::general_purpose::STANDARD.encode(bytes);
-        let start_s = samples_emitted as f64 / sample_rate;
-        let stop_s = (samples_emitted + n) as f64 / sample_rate;
-        samples_emitted += n;
-        if reply_tx.send(TtsReply::Audio { audio, start_s, stop_s, stream_id }).is_err() {
+        let encoded = encoder.encode(&pcm)?;
+        let audio = base64::engine::general_purpose::STANDARD.encode(&encoded.data);
+        if reply_tx
+            .send(TtsReply::Audio {
+                audio,
+                start_s: encoded.start_s,
+                stop_s: encoded.stop_s,
+                stream_id,
+            })
+            .is_err()
+        {
             break;
         }
     }

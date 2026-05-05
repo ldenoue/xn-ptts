@@ -20,7 +20,7 @@ impl std::str::FromStr for Format {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let format = match s.to_lowercase().as_str() {
-            "" | "pcm" => Default::default(),
+            "" | "pcm" | "pcm_s16_le" => Default::default(),
             "pcm_8000" => Self::pcm(8000),
             "pcm_16000" => Self::pcm(16000),
             "pcm_22050" => Self::pcm(22050),
