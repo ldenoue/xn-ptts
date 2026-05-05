@@ -177,11 +177,11 @@ async fn handle_setup<Q: xn::BackendQ>(
         )?;
         return Ok(None);
     }
-    if output_format != "pcm_s16_le" {
+    if output_format != "pcm_s16_le" && output_format != "pcm" {
         send_error(
             reply_tx,
             error_codes::BAD_REQUEST,
-            format!("unsupported output_format '{output_format}'; only 'pcm_s16_le' is accepted"),
+            format!("unsupported output_format '{output_format}'; only 'pcm' is accepted"),
         )?;
         return Ok(None);
     }
