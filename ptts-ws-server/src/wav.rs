@@ -1,6 +1,3 @@
-#![allow(unused)]
-use anyhow::{Result, bail};
-use rubato::Resampler;
 use std::io::prelude::*;
 
 pub trait Sample {
@@ -61,6 +58,7 @@ pub fn write_pcm_in_wav<W: Write, S: Sample>(w: &mut W, samples: &[S]) -> std::i
     Ok(samples.len() * std::mem::size_of::<i16>())
 }
 
+#[allow(unused)]
 pub fn write_pcm_as_wav<W: Write, S: Sample>(
     w: &mut W,
     samples: &[S],
@@ -71,53 +69,4 @@ pub fn write_pcm_as_wav<W: Write, S: Sample>(
     write_wav_header(w, sample_rate, chunk_size, data_size)?;
     write_pcm_in_wav(w, samples)?;
     Ok(())
-}
-
-enum Parsed<'a, T> {
-    Incomplete,
-    Complete(T, &'a [u8]),
-}
-
-struct MasterChunk;
-
-impl MasterChunk {
-    fn parse(data: &[u8]) -> Result<Parsed<'_, Self>> {
-        if data.len() < 12 {
-            return Ok(Parsed::Incomplete);
-        }
-        if &data[0..4] != b"RIFF" {
-            bail!("wav-decoder: invalid RIFF header");
-        }
-        if &data[8..12] != b"WAVE" {
-            bail!("wav-decoder: invalid WAVE format");
-        }
-
-        Ok(Parsed::Complete(MasterChunk, &data[12..]))
-    }
-}
-
-#[derive(Debug, Clone)]
-struct FmtChunk {
-    audio_format: u16,
-    channels: u16,
-    sample_rate: u32,
-    bits_per_sample: u16,
-}
-
-impl FmtChunk {
-    fn parse(data: &[u8]) -> Result<Parsed<'_, Self>> {
-        if data.len() < 24 {
-            return Ok(Parsed::Incomplete);
-        }
-        if &data[0..4] != b"fmt " {
-            bail!("wav-decoder: invalid fmt chunk");
-        }
-        let audio_format = u16::from_le_bytes([data[8], data[9]]);
-        let channels = u16::from_le_bytes([data[10], data[11]]);
-        let sample_rate = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-        let bits_per_sample = u16::from_le_bytes([data[22], data[23]]);
-
-        let fmt = Self { audio_format, channels, sample_rate, bits_per_sample };
-        Ok(Parsed::Complete(fmt, &data[24..]))
-    }
 }
