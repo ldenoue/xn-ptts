@@ -2,7 +2,9 @@
 rustflags = ["-C", "target-cpu=native"]
 
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "target-feature=+simd128,+relaxed-simd", "--cfg", "getrandom_backend=\"wasm_js\""]
+# Keep browser builds on fixed-width SIMD only. Chrome accepts relaxed SIMD,
+# but Safari rejects those newer opcodes while parsing the module.
+rustflags = ["-C", "target-feature=+simd128,-relaxed-simd", "--cfg", "getrandom_backend=\"wasm_js\""]
 
 [target.wasm32-wasip1]
 runner = "wasmtime"

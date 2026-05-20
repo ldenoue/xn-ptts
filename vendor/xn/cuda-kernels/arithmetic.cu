@@ -1,0 +1,763 @@
+#include "cuda_fp16.h"
+#include "cuda_bf16.h"
+#include<stdint.h>
+#include<math.h>
+
+// ============================================================================
+// Helper functions for type conversions and math
+// ============================================================================
+
+template<typename T> __device__ __forceinline__ float to_float(T v);
+template<> __device__ __forceinline__ float to_float(float v) { return v; }
+template<> __device__ __forceinline__ float to_float(double v) { return (float)v; }
+template<> __device__ __forceinline__ float to_float(__half v) { return __half2float(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ float to_float(__nv_bfloat16 v) { return __bfloat162float(v); }
+#endif
+
+template<typename T> __device__ __forceinline__ T from_float(float v);
+template<> __device__ __forceinline__ float from_float(float v) { return v; }
+template<> __device__ __forceinline__ double from_float(float v) { return (double)v; }
+template<> __device__ __forceinline__ __half from_float(float v) { return __float2half(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 from_float(float v) { return __float2bfloat16(v); }
+#endif
+
+// ============================================================================
+// Typed math helpers - avoid unnecessary float conversions
+// ============================================================================
+
+// neg
+template<typename T> __device__ __forceinline__ T t_neg(T v) { return from_float<T>(-to_float(v)); }
+template<> __device__ __forceinline__ float t_neg(float v) { return -v; }
+template<> __device__ __forceinline__ double t_neg(double v) { return -v; }
+template<> __device__ __forceinline__ __half t_neg(__half v) { return __hneg(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_neg(__nv_bfloat16 v) { return __hneg(v); }
+#endif
+
+// abs
+template<typename T> __device__ __forceinline__ T t_abs(T v) { return from_float<T>(fabsf(to_float(v))); }
+template<> __device__ __forceinline__ float t_abs(float v) { return fabsf(v); }
+template<> __device__ __forceinline__ double t_abs(double v) { return fabs(v); }
+template<> __device__ __forceinline__ __half t_abs(__half v) { return __habs(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_abs(__nv_bfloat16 v) { return __habs(v); }
+#endif
+
+// cos
+template<typename T> __device__ __forceinline__ T t_cos(T v) { return from_float<T>(cosf(to_float(v))); }
+template<> __device__ __forceinline__ float t_cos(float v) { return cosf(v); }
+template<> __device__ __forceinline__ double t_cos(double v) { return cos(v); }
+template<> __device__ __forceinline__ __half t_cos(__half v) { return hcos(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_cos(__nv_bfloat16 v) { return hcos(v); }
+#endif
+
+// sin
+template<typename T> __device__ __forceinline__ T t_sin(T v) { return from_float<T>(sinf(to_float(v))); }
+template<> __device__ __forceinline__ float t_sin(float v) { return sinf(v); }
+template<> __device__ __forceinline__ double t_sin(double v) { return sin(v); }
+template<> __device__ __forceinline__ __half t_sin(__half v) { return hsin(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_sin(__nv_bfloat16 v) { return hsin(v); }
+#endif
+
+// exp
+template<typename T> __device__ __forceinline__ T t_exp(T v) { return from_float<T>(expf(to_float(v))); }
+template<> __device__ __forceinline__ float t_exp(float v) { return expf(v); }
+template<> __device__ __forceinline__ double t_exp(double v) { return exp(v); }
+template<> __device__ __forceinline__ __half t_exp(__half v) { return hexp(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_exp(__nv_bfloat16 v) { return hexp(v); }
+#endif
+
+// log
+template<typename T> __device__ __forceinline__ T t_log(T v) { return from_float<T>(logf(to_float(v))); }
+template<> __device__ __forceinline__ float t_log(float v) { return logf(v); }
+template<> __device__ __forceinline__ double t_log(double v) { return log(v); }
+template<> __device__ __forceinline__ __half t_log(__half v) { return hlog(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_log(__nv_bfloat16 v) { return hlog(v); }
+#endif
+
+// sqrt
+template<typename T> __device__ __forceinline__ T t_sqrt(T v) { return from_float<T>(sqrtf(to_float(v))); }
+template<> __device__ __forceinline__ float t_sqrt(float v) { return sqrtf(v); }
+template<> __device__ __forceinline__ double t_sqrt(double v) { return sqrt(v); }
+template<> __device__ __forceinline__ __half t_sqrt(__half v) { return hsqrt(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_sqrt(__nv_bfloat16 v) { return hsqrt(v); }
+#endif
+
+// rsqrt
+template<typename T> __device__ __forceinline__ T t_rsqrt(T v) { return from_float<T>(rsqrtf(to_float(v))); }
+template<> __device__ __forceinline__ float t_rsqrt(float v) { return rsqrtf(v); }
+template<> __device__ __forceinline__ double t_rsqrt(double v) { return rsqrt(v); }
+template<> __device__ __forceinline__ __half t_rsqrt(__half v) { return hrsqrt(v); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_rsqrt(__nv_bfloat16 v) { return hrsqrt(v); }
+#endif
+
+// tanh
+template<typename T> __device__ __forceinline__ T t_tanh(T v) { return from_float<T>(tanhf(to_float(v))); }
+template<> __device__ __forceinline__ float t_tanh(float v) { return tanhf(v); }
+template<> __device__ __forceinline__ double t_tanh(double v) { return tanh(v); }
+
+// erf
+template<typename T> __device__ __forceinline__ T t_erf(T v) { return from_float<T>(erff(to_float(v))); }
+template<> __device__ __forceinline__ float t_erf(float v) { return erff(v); }
+template<> __device__ __forceinline__ double t_erf(double v) { return erf(v); }
+
+// zero constant
+template<typename T> __device__ __forceinline__ T t_zero();
+template<> __device__ __forceinline__ float t_zero() { return 0.0f; }
+template<> __device__ __forceinline__ double t_zero() { return 0.0; }
+template<> __device__ __forceinline__ __half t_zero() { return __float2half(0.0f); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_zero() { return __float2bfloat16(0.0f); }
+#endif
+
+// one constant
+template<typename T> __device__ __forceinline__ T t_one();
+template<> __device__ __forceinline__ float t_one() { return 1.0f; }
+template<> __device__ __forceinline__ double t_one() { return 1.0; }
+template<> __device__ __forceinline__ __half t_one() { return __float2half(1.0f); }
+#if __CUDA_ARCH__ >= 800
+template<> __device__ __forceinline__ __nv_bfloat16 t_one() { return __float2bfloat16(1.0f); }
+#endif
+
+// ============================================================================
+// Scale-add operation (out-of-place: dst = src * scale + add)
+// ============================================================================
+
+template <typename T>
+__device__ void scale_add_op(const size_t numel, const T * src, T * dst, const T scale, const T add) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = src[idx] * scale + add;
+}
+
+// ============================================================================
+// Binary operations (out-of-place: dst = lhs op rhs)
+// ============================================================================
+
+template <typename T>
+__device__ void binary_add(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = lhs[idx] + rhs[idx];
+}
+
+template <typename T>
+__device__ void binary_sub(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = lhs[idx] - rhs[idx];
+}
+
+template <typename T>
+__device__ void binary_mul(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = lhs[idx] * rhs[idx];
+}
+
+template <typename T>
+__device__ void binary_div(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = lhs[idx] / rhs[idx];
+}
+
+template <typename T>
+__device__ void binary_maximum(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T l = lhs[idx];
+    T r = rhs[idx];
+    dst[idx] = (l > r) ? l : r;
+}
+
+template <typename T>
+__device__ void binary_minimum(const size_t numel, const T * lhs, const T * rhs, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T l = lhs[idx];
+    T r = rhs[idx];
+    dst[idx] = (l < r) ? l : r;
+}
+
+// ============================================================================
+// Binary assign operations (in-place: dst op= src)
+// ============================================================================
+
+template <typename T>
+__device__ void assign_add(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] += src[idx];
+}
+
+template <typename T>
+__device__ void assign_sub(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] -= src[idx];
+}
+
+template <typename T>
+__device__ void assign_mul(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] *= src[idx];
+}
+
+template <typename T>
+__device__ void assign_div(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] /= src[idx];
+}
+
+template <typename T>
+__device__ void assign_maximum(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T d = dst[idx];
+    T s = src[idx];
+    dst[idx] = (d > s) ? d : s;
+}
+
+template <typename T>
+__device__ void assign_minimum(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T d = dst[idx];
+    T s = src[idx];
+    dst[idx] = (d < s) ? d : s;
+}
+
+// ============================================================================
+// Unary operations (out-of-place: dst = op(src))
+// ============================================================================
+
+template <typename T>
+__device__ void unary_cos(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_cos(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_sin(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_sin(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_exp(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_exp(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_log(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_log(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_neg(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_neg(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_sqr(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T v = src[idx];
+    dst[idx] = v * v;
+}
+
+template <typename T>
+__device__ void unary_sqrt(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_sqrt(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_rsqrt(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_rsqrt(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_abs(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_abs(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_gelu_erf(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    // GELU(x) = x * 0.5 * (1 + erf(x / sqrt(2)))
+    T x = src[idx];
+    T half = t_one<T>() / (t_one<T>() + t_one<T>());
+    dst[idx] = x * half * (t_one<T>() + t_erf(x * from_float<T>(0.7071067811865476f)));
+}
+
+template <typename T>
+__device__ void unary_elu(const size_t numel, const T * src, T * dst, float alpha) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = src[idx];
+    T zero = t_zero<T>();
+    dst[idx] = (x > zero) ? x : from_float<T>(alpha) * (t_exp(x) - t_one<T>());
+}
+
+template <typename T>
+__device__ void unary_relu(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = src[idx];
+    T zero = t_zero<T>();
+    dst[idx] = (x > zero) ? x : zero;
+}
+
+template <typename T>
+__device__ void unary_silu(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    // SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
+    T x = src[idx];
+    dst[idx] = x / (t_one<T>() + t_exp(t_neg(x)));
+}
+
+template <typename T>
+__device__ void unary_tanh(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_tanh(src[idx]);
+}
+
+template <typename T>
+__device__ void unary_sigmoid(const size_t numel, const T * src, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = src[idx];
+    dst[idx] = t_one<T>() / (t_one<T>() + t_exp(t_neg(x)));
+}
+
+// ============================================================================
+// Inplace unary operations (dst = op(dst))
+// ============================================================================
+
+template <typename T>
+__device__ void inplace_cos(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_cos(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_sin(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_sin(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_exp(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_exp(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_log(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_log(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_neg(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_neg(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_sqr(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T v = dst[idx];
+    dst[idx] = v * v;
+}
+
+template <typename T>
+__device__ void inplace_sqrt(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_sqrt(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_rsqrt(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_rsqrt(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_abs(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_abs(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_gelu_erf(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = dst[idx];
+    T half = t_one<T>() / (t_one<T>() + t_one<T>());
+    dst[idx] = x * half * (t_one<T>() + t_erf(x * from_float<T>(0.7071067811865476f)));
+}
+
+template <typename T>
+__device__ void inplace_elu(const size_t numel, T * dst, float alpha) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = dst[idx];
+    T zero = t_zero<T>();
+    dst[idx] = (x > zero) ? x : from_float<T>(alpha) * (t_exp(x) - t_one<T>());
+}
+
+template <typename T>
+__device__ void inplace_relu(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = dst[idx];
+    T zero = t_zero<T>();
+    dst[idx] = (x > zero) ? x : zero;
+}
+
+template <typename T>
+__device__ void inplace_silu(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = dst[idx];
+    dst[idx] = x / (t_one<T>() + t_exp(t_neg(x)));
+}
+
+template <typename T>
+__device__ void inplace_tanh(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = t_tanh(dst[idx]);
+}
+
+template <typename T>
+__device__ void inplace_sigmoid(const size_t numel, T * dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    T x = dst[idx];
+    dst[idx] = t_one<T>() / (t_one<T>() + t_exp(t_neg(x)));
+}
+
+// ============================================================================
+// Kernel definitions macro
+// ============================================================================
+
+#define BINARY_OPS(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void binary_add_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_add<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+  extern "C" __global__ void binary_sub_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_sub<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+  extern "C" __global__ void binary_mul_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_mul<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+  extern "C" __global__ void binary_div_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_div<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+  extern "C" __global__ void binary_maximum_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_maximum<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+  extern "C" __global__ void binary_minimum_##RUST_NAME( \
+      const size_t numel, const TYPENAME *lhs, const TYPENAME *rhs, TYPENAME *dst) { \
+    binary_minimum<TYPENAME>(numel, lhs, rhs, dst); \
+  } \
+
+#define ASSIGN_OPS(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void assign_add_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_add<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void assign_sub_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_sub<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void assign_mul_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_mul<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void assign_div_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_div<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void assign_maximum_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_maximum<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void assign_minimum_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    assign_minimum<TYPENAME>(numel, src, dst); \
+  } \
+
+#define UNARY_OPS(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void unary_cos_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_cos<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_sin_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_sin<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_exp_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_exp<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_log_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_log<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_neg_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_neg<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_sqr_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_sqr<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_sqrt_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_sqrt<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_rsqrt_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_rsqrt<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_abs_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_abs<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_gelu_erf_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_gelu_erf<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_elu_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst, float alpha) { \
+    unary_elu<TYPENAME>(numel, src, dst, alpha); \
+  } \
+  extern "C" __global__ void unary_relu_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_relu<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_silu_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_silu<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_tanh_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_tanh<TYPENAME>(numel, src, dst); \
+  } \
+  extern "C" __global__ void unary_sigmoid_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst) { \
+    unary_sigmoid<TYPENAME>(numel, src, dst); \
+  } \
+
+#define INPLACE_UNARY_OPS(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void inplace_cos_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_cos<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_sin_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_sin<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_exp_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_exp<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_log_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_log<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_neg_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_neg<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_sqr_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_sqr<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_sqrt_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_sqrt<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_rsqrt_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_rsqrt<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_abs_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_abs<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_gelu_erf_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_gelu_erf<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_elu_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst, float alpha) { \
+    inplace_elu<TYPENAME>(numel, dst, alpha); \
+  } \
+  extern "C" __global__ void inplace_relu_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_relu<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_silu_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_silu<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_tanh_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_tanh<TYPENAME>(numel, dst); \
+  } \
+  extern "C" __global__ void inplace_sigmoid_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst) { \
+    inplace_sigmoid<TYPENAME>(numel, dst); \
+  } \
+
+#define SCALE_ADD_OP(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void scale_add_##RUST_NAME( \
+      const size_t numel, const TYPENAME *src, TYPENAME *dst, const TYPENAME scale, const TYPENAME add) { \
+    scale_add_op<TYPENAME>(numel, src, dst, scale, add); \
+  } \
+
+#define INPLACE_SCALE_ADD_OP(TYPENAME, RUST_NAME) \
+  extern "C" __global__ void inplace_scale_add_##RUST_NAME( \
+      const size_t numel, TYPENAME *dst, const TYPENAME scale, const TYPENAME add) { \
+    scale_add_op<TYPENAME>(numel, dst, dst, scale, add); \
+  } \
+
+#define ALL_OPS(TYPENAME, RUST_NAME) \
+  BINARY_OPS(TYPENAME, RUST_NAME) \
+  ASSIGN_OPS(TYPENAME, RUST_NAME) \
+  UNARY_OPS(TYPENAME, RUST_NAME) \
+  INPLACE_UNARY_OPS(TYPENAME, RUST_NAME) \
+  SCALE_ADD_OP(TYPENAME, RUST_NAME) \
+  INPLACE_SCALE_ADD_OP(TYPENAME, RUST_NAME) \
+
+#if __CUDA_ARCH__ >= 800
+ALL_OPS(__nv_bfloat16, bf16)
+#endif
+
+#if __CUDA_ARCH__ >= 530
+ALL_OPS(__half, f16)
+#endif
+
+ALL_OPS(float, f32)
+ALL_OPS(double, f64)
+
+// ============================================================================
+// Cast operations (dtype conversion: dst = convert(src))
+// ============================================================================
+
+// Extend to_float/from_float for integer types.
+template<> __device__ __forceinline__ float to_float(int64_t v) { return (float)v; }
+template<> __device__ __forceinline__ float to_float(uint8_t v) { return (float)v; }
+template<> __device__ __forceinline__ int64_t from_float<int64_t>(float v) { return (int64_t)v; }
+template<> __device__ __forceinline__ uint8_t from_float<uint8_t>(float v) { return (uint8_t)v; }
+
+template<typename S, typename D>
+__device__ void cast_op(const size_t numel, const S* src, D* dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = from_float<D>(to_float(src[idx]));
+}
+
+// Same-type cast (direct copy).
+template<typename T>
+__device__ void cast_copy(const size_t numel, const T* src, T* dst) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numel) return;
+    dst[idx] = src[idx];
+}
+
+#define CAST_OP(SRC_TYPE, SRC_NAME, DST_TYPE, DST_NAME) \
+  extern "C" __global__ void cast_##SRC_NAME##_##DST_NAME( \
+      const size_t numel, const SRC_TYPE *src, DST_TYPE *dst) { \
+    cast_op<SRC_TYPE, DST_TYPE>(numel, src, dst); \
+  }
+
+#define CAST_SAME(TYPE, NAME) \
+  extern "C" __global__ void cast_##NAME##_##NAME( \
+      const size_t numel, const TYPE *src, TYPE *dst) { \
+    cast_copy<TYPE>(numel, src, dst); \
+  }
+
+// Same-type casts (identity copy).
+CAST_SAME(float, f32)
+CAST_SAME(int64_t, i64)
+CAST_SAME(uint8_t, u8)
+
+// Casts between f32, i64, u8 (no arch requirements).
+CAST_OP(float, f32, int64_t, i64)
+CAST_OP(float, f32, uint8_t, u8)
+CAST_OP(int64_t, i64, float, f32)
+CAST_OP(int64_t, i64, uint8_t, u8)
+CAST_OP(uint8_t, u8, float, f32)
+CAST_OP(uint8_t, u8, int64_t, i64)
+
+#if __CUDA_ARCH__ >= 530
+// f16 casts.
+CAST_SAME(__half, f16)
+CAST_OP(__half, f16, float, f32)
+CAST_OP(__half, f16, int64_t, i64)
+CAST_OP(__half, f16, uint8_t, u8)
+CAST_OP(float, f32, __half, f16)
+CAST_OP(int64_t, i64, __half, f16)
+CAST_OP(uint8_t, u8, __half, f16)
+#endif
+
+#if __CUDA_ARCH__ >= 800
+// bf16 casts.
+CAST_SAME(__nv_bfloat16, bf16)
+CAST_OP(__nv_bfloat16, bf16, float, f32)
+CAST_OP(__nv_bfloat16, bf16, __half, f16)
+CAST_OP(__nv_bfloat16, bf16, int64_t, i64)
+CAST_OP(__nv_bfloat16, bf16, uint8_t, u8)
+CAST_OP(float, f32, __nv_bfloat16, bf16)
+CAST_OP(__half, f16, __nv_bfloat16, bf16)
+CAST_OP(int64_t, i64, __nv_bfloat16, bf16)
+CAST_OP(uint8_t, u8, __nv_bfloat16, bf16)
+#endif
+

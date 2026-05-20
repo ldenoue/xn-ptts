@@ -203,7 +203,7 @@ function stopVisualizer() {
 }
 
 // ---- Worker setup ----
-const worker = new Worker('worker.js', { type: 'module' });
+const worker = new Worker('worker.js?v=simd128-no-relaxed-simd', { type: 'module' });
 
 let sampleRate = 24000;
 let audioCtx = null;
