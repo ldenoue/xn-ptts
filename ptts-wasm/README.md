@@ -2,7 +2,7 @@
 
 WebAssembly build of [Pocket TTS](../ptts/) — run text-to-speech directly in the browser.
 
-Try it online [here](https://laurentmazare.github.io/pocket-tts).
+Try it online [here](https://ldenoue.github.io/xn-ptts/).
 
 ## Prerequisites
 
