@@ -4,6 +4,7 @@ const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/
 const HF_BASE_Q8 = 'https://huggingface.co/lmz/pocket-tts-without-voice-cloning-q8/resolve/main';
 const TOKENIZER_URL = `${HF_BASE}/tokenizer.model`;
 const ASSET_CACHE = 'pocket-tts-assets-v1';
+const CACHE_KEY_PREFIX = '/__pocket_tts_asset__?url=';
 
 function modelUrl(quant) {
   if (quant === 'q8') return `${HF_BASE_Q8}/tts_b6369a24.gguf`;
@@ -16,6 +17,10 @@ function voiceUrl(name) {
 
 function post(type, data = {}, transferables = []) {
   self.postMessage({ type, ...data }, transferables);
+}
+
+function cacheRequest(url) {
+  return new Request(CACHE_KEY_PREFIX + encodeURIComponent(url));
 }
 
 // ---- Fetch with progress (posts to main thread) ----
@@ -63,7 +68,7 @@ async function fetchCachedBytes(url, label) {
   let request = null;
   try {
     cache = await caches.open(ASSET_CACHE);
-    request = new Request(url, { mode: 'cors', credentials: 'omit' });
+    request = cacheRequest(url);
     const cached = await cache.match(request);
     if (cached) {
       post('status', { message: `${label}: loaded from browser cache` });
@@ -82,6 +87,7 @@ async function fetchCachedBytes(url, label) {
           'content-type': contentType,
         },
       }));
+      post('status', { message: `${label}: saved to browser cache` });
     } catch (err) {
       console.warn(`Could not cache ${label}`, err);
       post('status', { message: `${label}: downloaded, but browser cache storage was unavailable or full` });
