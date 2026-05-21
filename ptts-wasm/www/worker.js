@@ -11,8 +11,11 @@ function modelUrl(quant) {
   return `${HF_BASE}/tts_b6369a24.safetensors`;
 }
 
-function voiceUrl(name) {
-  return `${HF_BASE}/embeddings_v2/${name}.safetensors`;
+const VOICE_SETS = new Set(['embeddings', 'embeddings_v2', 'embeddings_v3']);
+
+function voiceUrl(name, voiceSet) {
+  const dir = VOICE_SETS.has(voiceSet) ? voiceSet : 'embeddings';
+  return `${HF_BASE}/${dir}/${name}.safetensors`;
 }
 
 function post(type, data = {}, transferables = []) {
@@ -257,7 +260,10 @@ let model = null;
 let tokenizer = null;
 let voiceIndexMap = {};
 
-async function handleLoad(quant) {
+async function handleLoad(quant, voiceSet) {
+  const voiceDir = VOICE_SETS.has(voiceSet) ? voiceSet : 'embeddings';
+  voiceIndexMap = {};
+
   const wasmModule = await wasmModulePromise;
   await init(wasmModule);
   post('status', { message: 'WASM initialized. Loading tokenizer and model...' });
@@ -274,13 +280,13 @@ async function handleLoad(quant) {
 
   for (const name of VOICE_NAMES) {
     post('status', { message: `Loading voice: ${name}...` });
-    const voiceData = await fetchCachedBytes(voiceUrl(name), `Voice: ${name}`);
+    const voiceData = await fetchCachedBytes(voiceUrl(name, voiceDir), `Voice ${voiceDir}: ${name}`);
     voiceIndexMap[name] = model.add_voice(voiceData);
   }
 
   const sampleRate = model.sample_rate();
   const features = cpu_features();
-  post('loaded', { sampleRate, features });
+  post('loaded', { sampleRate, features, voiceSet: voiceDir });
 }
 
 async function handleGenerate(text, voiceName, temperature) {
@@ -328,7 +334,7 @@ self.onmessage = async (e) => {
   const { type, ...data } = e.data;
   try {
     if (type === 'load') {
-      await handleLoad(data.quant || 'f32');
+      await handleLoad(data.quant || 'f32', data.voiceSet || 'embeddings');
     } else if (type === 'generate') {
       await handleGenerate(data.text, data.voiceName, data.temperature);
     }
