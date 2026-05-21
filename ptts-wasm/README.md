@@ -22,6 +22,10 @@ make build
 
 This runs `wasm-pack build` and copies `index.html` into `pkg/`.
 
+The browser build enables fixed-width WebAssembly SIMD (`simd128`) but not
+relaxed SIMD. Relaxed SIMD can work in Chrome, but Safari rejects those opcodes
+while parsing the module.
+
 ## Run
 
 Serve the `pkg/` directory with any HTTP server, for example:

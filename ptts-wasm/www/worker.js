@@ -205,7 +205,8 @@ const VOICE_NAMES = ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine'
 
 // Start WASM compilation immediately so the optimizing compiler (TurboFan)
 // finishes well before the first generation runs.
-const wasmModulePromise = WebAssembly.compileStreaming(fetch('ptts_wasm_bg.wasm'));
+const WASM_URL = 'ptts_wasm_bg.wasm?v=simd128-no-relaxed-simd';
+const wasmModulePromise = WebAssembly.compileStreaming(fetch(WASM_URL, { cache: 'no-cache' }));
 
 let model = null;
 let tokenizer = null;
