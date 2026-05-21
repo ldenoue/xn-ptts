@@ -37,11 +37,11 @@ python3 -m http.server 8080
 
 Then open http://localhost:8080 in your browser. The page will download the
 model weights from HuggingFace on first use (~240 MB for f32, ~146 MB for q8).
-The demo can load the older `embeddings` built-in voices (~4 MB total), the
-newer `embeddings_v2` voices (~52 MB total), or `embeddings_v3` for the voices
-shown in the UI (~46 MB total). The worker stores the
-tokenizer, selected model weights, and built-in voice files in the browser Cache
-API, so later loads can reuse those blobs without re-downloading them.
+The demo loads built-in voices from `embeddings_v3` (~46 MB total for the voices
+shown in the UI). The worker stores the tokenizer, selected model weights, and
+built-in voice files in the browser Cache API, so later loads can reuse those
+blobs without re-downloading them. Use the page's Clear Cache button to remove
+those cached assets.
 
 ## Todo
 

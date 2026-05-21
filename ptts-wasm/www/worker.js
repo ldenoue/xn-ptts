@@ -5,17 +5,15 @@ const HF_BASE_Q8 = 'https://huggingface.co/lmz/pocket-tts-without-voice-cloning-
 const TOKENIZER_URL = `${HF_BASE}/tokenizer.model`;
 const ASSET_CACHE = 'pocket-tts-assets-v1';
 const CACHE_KEY_PREFIX = '/__pocket_tts_asset__?url=';
+const VOICE_SET = 'embeddings_v3';
 
 function modelUrl(quant) {
   if (quant === 'q8') return `${HF_BASE_Q8}/tts_b6369a24.gguf`;
   return `${HF_BASE}/tts_b6369a24.safetensors`;
 }
 
-const VOICE_SETS = new Set(['embeddings', 'embeddings_v2', 'embeddings_v3']);
-
-function voiceUrl(name, voiceSet) {
-  const dir = VOICE_SETS.has(voiceSet) ? voiceSet : 'embeddings';
-  return `${HF_BASE}/${dir}/${name}.safetensors`;
+function voiceUrl(name) {
+  return `${HF_BASE}/${VOICE_SET}/${name}.safetensors`;
 }
 
 function post(type, data = {}, transferables = []) {
@@ -97,6 +95,19 @@ async function fetchCachedBytes(url, label) {
     }
   }
   return bytes;
+}
+
+async function clearAssetCache() {
+  if (!('caches' in self)) {
+    post('cache_cleared', { message: 'Browser Cache API is not available.' });
+    return;
+  }
+
+  const deleted = await caches.delete(ASSET_CACHE);
+  const message = deleted
+    ? 'Cached Pocket TTS assets cleared.'
+    : 'No cached Pocket TTS assets were found.';
+  post('cache_cleared', { message });
 }
 
 // ---- Minimal protobuf decoder for sentencepiece .model files ----
@@ -260,8 +271,7 @@ let model = null;
 let tokenizer = null;
 let voiceIndexMap = {};
 
-async function handleLoad(quant, voiceSet) {
-  const voiceDir = VOICE_SETS.has(voiceSet) ? voiceSet : 'embeddings';
+async function handleLoad(quant) {
   voiceIndexMap = {};
 
   const wasmModule = await wasmModulePromise;
@@ -280,13 +290,13 @@ async function handleLoad(quant, voiceSet) {
 
   for (const name of VOICE_NAMES) {
     post('status', { message: `Loading voice: ${name}...` });
-    const voiceData = await fetchCachedBytes(voiceUrl(name, voiceDir), `Voice ${voiceDir}: ${name}`);
+    const voiceData = await fetchCachedBytes(voiceUrl(name), `Voice ${VOICE_SET}: ${name}`);
     voiceIndexMap[name] = model.add_voice(voiceData);
   }
 
   const sampleRate = model.sample_rate();
   const features = cpu_features();
-  post('loaded', { sampleRate, features, voiceSet: voiceDir });
+  post('loaded', { sampleRate, features, voiceSet: VOICE_SET });
 }
 
 async function handleGenerate(text, voiceName, temperature) {
@@ -334,7 +344,9 @@ self.onmessage = async (e) => {
   const { type, ...data } = e.data;
   try {
     if (type === 'load') {
-      await handleLoad(data.quant || 'f32', data.voiceSet || 'embeddings');
+      await handleLoad(data.quant || 'f32');
+    } else if (type === 'clear_cache') {
+      await clearAssetCache();
     } else if (type === 'generate') {
       await handleGenerate(data.text, data.voiceName, data.temperature);
     }

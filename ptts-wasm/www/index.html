@@ -24,6 +24,8 @@
   audio { width: 100%; margin-top: 12px; }
   .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
   .controls .section { margin-bottom: 0; }
+  .secondary-btn { background: #374151; }
+  .secondary-btn:hover:not(:disabled) { background: #4b5563; }
   #visualizer { width: 100%; height: 140px; margin-top: 16px; display: block; }
   .slider-section { margin-bottom: 0; margin-left: auto; }
   .slider-section label { display: block; font-weight: 600; margin-bottom: 6px; color: #ccc; }
@@ -54,14 +56,6 @@
     </select>
   </div>
   <div class="section">
-    <label for="voice-set">Embeddings</label>
-    <select id="voice-set">
-      <option value="embeddings" selected>v1 (4MB)</option>
-      <option value="embeddings_v2">v2 (52MB)</option>
-      <option value="embeddings_v3">v3 (46MB)</option>
-    </select>
-  </div>
-  <div class="section">
     <label for="quant">Quantization</label>
     <select id="quant">
       <option value="f32">f32</option>
@@ -69,6 +63,7 @@
     </select>
   </div>
   <button id="load-btn">Load Weights (146MB)</button>
+  <button id="clear-cache-btn" class="secondary-btn">Clear Cache</button>
   <button id="generate-btn" style="display:none">Generate</button>
   <div class="slider-section">
     <label for="temperature">Temperature <span id="temp-value" class="slider-value">0.7</span></label>
@@ -84,9 +79,9 @@
 <script type="module">
 const statusEl = document.getElementById('status');
 const loadBtn = document.getElementById('load-btn');
+const clearCacheBtn = document.getElementById('clear-cache-btn');
 const btn = document.getElementById('generate-btn');
 const voiceSelect = document.getElementById('voice');
-const voiceSetSelect = document.getElementById('voice-set');
 const quantSelect = document.getElementById('quant');
 const progressBar = document.getElementById('progress-bar');
 const progressFill = document.getElementById('progress-fill');
@@ -100,14 +95,12 @@ tempSlider.addEventListener('input', () => {
 });
 
 const QUANT_SIZE_MB = { f32: 240, q8: 146 };
-const VOICE_SET_SIZE_MB = { embeddings: 4, embeddings_v2: 52, embeddings_v3: 46 };
+const VOICE_SIZE_MB = 46;
 function updateLoadBtnLabel() {
   const modelSize = QUANT_SIZE_MB[quantSelect.value] ?? 240;
-  const voiceSize = VOICE_SET_SIZE_MB[voiceSetSelect.value] ?? 4;
-  loadBtn.textContent = `Load Weights + Voices (${modelSize + voiceSize}MB)`;
+  loadBtn.textContent = `Load Weights + Voices (${modelSize + VOICE_SIZE_MB}MB)`;
 }
 quantSelect.addEventListener('change', updateLoadBtnLabel);
-voiceSetSelect.addEventListener('change', updateLoadBtnLabel);
 updateLoadBtnLabel();
 
 function log(msg) {
@@ -257,6 +250,11 @@ worker.onmessage = (e) => {
       hideProgress();
       break;
 
+    case 'cache_cleared':
+      clearCacheBtn.disabled = false;
+      log(data.message);
+      break;
+
     case 'loaded':
       sampleRate = data.sampleRate;
       cpuFeatures = data.features || {};
@@ -331,6 +329,7 @@ worker.onmessage = (e) => {
       log('Error: ' + data.message);
       console.error(data.message);
       btn.disabled = false;
+      clearCacheBtn.disabled = false;
       generating = false;
       break;
   }
@@ -365,13 +364,16 @@ function concatenateChunks(chunks) {
 function loadWeights() {
   loadBtn.disabled = true;
   quantSelect.disabled = true;
-  voiceSetSelect.disabled = true;
   worker.postMessage({
     type: 'load',
     voiceName: voiceSelect.value,
-    voiceSet: voiceSetSelect.value,
     quant: quantSelect.value,
   });
+}
+
+function clearCache() {
+  clearCacheBtn.disabled = true;
+  worker.postMessage({ type: 'clear_cache' });
 }
 
 function generate() {
@@ -441,6 +443,7 @@ function encodeWav(samples, sampleRate) {
 }
 
 loadBtn.addEventListener('click', loadWeights);
+clearCacheBtn.addEventListener('click', clearCache);
 btn.addEventListener('click', generate);
 
 // Start the render loop (draws empty bars until audio plays)
