@@ -3,6 +3,7 @@ import init, { Model, cpu_features } from './ptts_wasm.js';
 const HF_BASE = 'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning/resolve/main';
 const HF_BASE_Q8 = 'https://huggingface.co/lmz/pocket-tts-without-voice-cloning-q8/resolve/main';
 const TOKENIZER_URL = `${HF_BASE}/tokenizer.model`;
+const ASSET_CACHE = 'pocket-tts-assets-v1';
 
 function modelUrl(quant) {
   if (quant === 'q8') return `${HF_BASE_Q8}/tts_b6369a24.gguf`;
@@ -21,6 +22,7 @@ function post(type, data = {}, transferables = []) {
 async function fetchWithProgress(url, label) {
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
+  const contentType = resp.headers.get('content-type') || 'application/octet-stream';
   const total = parseInt(resp.headers.get('content-length') || '0', 10);
   const reader = resp.body.getReader();
   const chunks = [];
@@ -48,7 +50,44 @@ async function fetchWithProgress(url, label) {
     buf.set(chunk, offset);
     offset += chunk.length;
   }
-  return buf;
+  return { bytes: buf, contentType };
+}
+
+async function fetchCachedBytes(url, label) {
+  if (!('caches' in self)) {
+    const { bytes } = await fetchWithProgress(url, label);
+    return bytes;
+  }
+
+  let cache = null;
+  let request = null;
+  try {
+    cache = await caches.open(ASSET_CACHE);
+    request = new Request(url, { mode: 'cors', credentials: 'omit' });
+    const cached = await cache.match(request);
+    if (cached) {
+      post('status', { message: `${label}: loaded from browser cache` });
+      return new Uint8Array(await cached.arrayBuffer());
+    }
+  } catch (err) {
+    console.warn(`Could not read browser cache for ${label}`, err);
+  }
+
+  const { bytes, contentType } = await fetchWithProgress(url, label);
+  if (cache && request) {
+    try {
+      await cache.put(request, new Response(bytes.slice(), {
+        headers: {
+          'content-length': String(bytes.byteLength),
+          'content-type': contentType,
+        },
+      }));
+    } catch (err) {
+      console.warn(`Could not cache ${label}`, err);
+      post('status', { message: `${label}: downloaded, but browser cache storage was unavailable or full` });
+    }
+  }
+  return bytes;
 }
 
 // ---- Minimal protobuf decoder for sentencepiece .model files ----
@@ -215,21 +254,21 @@ let voiceIndexMap = {};
 async function handleLoad(quant) {
   const wasmModule = await wasmModulePromise;
   await init(wasmModule);
-  post('status', { message: 'WASM initialized. Downloading tokenizer and model...' });
+  post('status', { message: 'WASM initialized. Loading tokenizer and model...' });
 
-  const tokData = await fetchWithProgress(TOKENIZER_URL, 'Tokenizer');
+  const tokData = await fetchCachedBytes(TOKENIZER_URL, 'Tokenizer');
   const pieces = decodeSentencepieceModel(tokData);
   tokenizer = new UnigramTokenizer(pieces);
   post('status', { message: `Tokenizer loaded (${pieces.length} pieces)` });
 
-  const modelWeights = await fetchWithProgress(modelUrl(quant), 'Model weights');
+  const modelWeights = await fetchCachedBytes(modelUrl(quant), 'Model weights');
 
   post('status', { message: `Initializing model (quant=${quant})...` });
   model = new Model(modelWeights, quant);
 
   for (const name of VOICE_NAMES) {
     post('status', { message: `Loading voice: ${name}...` });
-    const voiceData = await fetchWithProgress(voiceUrl(name), `Voice: ${name}`);
+    const voiceData = await fetchCachedBytes(voiceUrl(name), `Voice: ${name}`);
     voiceIndexMap[name] = model.add_voice(voiceData);
   }
 

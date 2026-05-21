@@ -36,7 +36,9 @@ python3 -m http.server 8080
 ```
 
 Then open http://localhost:8080 in your browser. The page will download the
-model weights from HuggingFace on first use (~240 MB) and cache them for subsequent generations.
+model weights from HuggingFace on first use (~240 MB). The worker stores the
+tokenizer, selected model weights, and built-in voice files in the browser Cache
+API, so later loads can reuse those blobs without re-downloading them.
 
 ## Todo
 
