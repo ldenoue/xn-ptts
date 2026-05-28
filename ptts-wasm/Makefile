@@ -2,11 +2,13 @@
 
 build:
 	wasm-pack build --target web --release
-	cp www/index.html www/worker.js pkg/
+	cp pkg/ptts_wasm.js pkg/ptts_wasm_bg.wasm www/
+	cp www/index.html www/*.js www/*.wasm pkg/
 
 profiling:
 	wasm-pack build --target web --profiling
-	cp www/index.html www/worker.js pkg/
+	cp pkg/ptts_wasm.js pkg/ptts_wasm_bg.wasm www/
+	cp www/index.html www/*.js www/*.wasm pkg/
 
 clean:
 	rm -rf pkg

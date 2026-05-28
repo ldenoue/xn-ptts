@@ -35,7 +35,7 @@
 </head>
 <body>
 
-<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a> </p>
+<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a> or <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a></p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -43,6 +43,13 @@
 </div>
 
 <div class="controls">
+  <div class="section">
+    <label for="engine">Engine</label>
+    <select id="engine">
+      <option value="xn" selected>xn GGUF q8/f32</option>
+      <option value="idle">Candle Q8_0 (128 MiB)</option>
+    </select>
+  </div>
   <div class="section">
     <label for="voice">Voice</label>
     <select id="voice">
@@ -81,6 +88,7 @@ const statusEl = document.getElementById('status');
 const loadBtn = document.getElementById('load-btn');
 const clearCacheBtn = document.getElementById('clear-cache-btn');
 const btn = document.getElementById('generate-btn');
+const engineSelect = document.getElementById('engine');
 const voiceSelect = document.getElementById('voice');
 const quantSelect = document.getElementById('quant');
 const progressBar = document.getElementById('progress-bar');
@@ -94,12 +102,29 @@ tempSlider.addEventListener('input', () => {
   tempValue.textContent = tempSlider.value;
 });
 
-const QUANT_SIZE_MB = { f32: 240, q8: 146 };
-const VOICE_SIZE_MB = 46;
+const ENGINE_INFO = {
+  xn: {
+    worker: 'worker.js?v=simd128-no-relaxed-simd',
+    modelSizeMb: { f32: 240, q8: 146 },
+    voiceSizeMb: 46,
+  },
+  idle: {
+    worker: 'idle_worker.js?v=idle-candle-q8',
+    modelSizeMb: { q8: 134 },
+    voiceSizeMb: 43,
+  },
+};
+
 function updateLoadBtnLabel() {
-  const modelSize = QUANT_SIZE_MB[quantSelect.value] ?? 240;
-  loadBtn.textContent = `Load Weights + Voices (${modelSize + VOICE_SIZE_MB}MB)`;
+  const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  const quant = engineSelect.value === 'idle' ? 'q8' : quantSelect.value;
+  const modelSize = engine.modelSizeMb[quant] ?? engine.modelSizeMb.q8;
+  loadBtn.textContent = `Load Weights + Voices (${modelSize + engine.voiceSizeMb}MB)`;
 }
+engineSelect.addEventListener('change', () => {
+  resetWorkerForEngine();
+  updateLoadBtnLabel();
+});
 quantSelect.addEventListener('change', updateLoadBtnLabel);
 updateLoadBtnLabel();
 
@@ -208,7 +233,8 @@ function stopVisualizer() {
 }
 
 // ---- Worker setup ----
-const worker = new Worker('worker.js?v=simd128-no-relaxed-simd', { type: 'module' });
+let worker = null;
+let currentEngine = engineSelect.value;
 
 let sampleRate = 24000;
 let audioCtx = null;
@@ -221,6 +247,44 @@ let replayAudioCtx = null;
 let replaySource = null;
 let cpuFeatures = {};
 
+function createWorker() {
+  currentEngine = engineSelect.value;
+  worker = new Worker(ENGINE_INFO[currentEngine].worker, { type: 'module' });
+  worker.onmessage = handleWorkerMessage;
+  worker.onerror = (event) => {
+    const detail = event.message || 'Worker failed to start';
+    log(`Error: ${currentEngine} worker failed to start: ${detail}`);
+    loadBtn.disabled = false;
+    engineSelect.disabled = false;
+    quantSelect.disabled = currentEngine === 'idle';
+  };
+  worker.onmessageerror = () => {
+    log(`Error: ${currentEngine} worker sent an unreadable message.`);
+    loadBtn.disabled = false;
+    engineSelect.disabled = false;
+    quantSelect.disabled = currentEngine === 'idle';
+  };
+}
+
+function resetWorkerForEngine() {
+  if (worker) worker.terminate();
+  worker = null;
+  const selectedEngine = engineSelect.value;
+  sampleRate = 24000;
+  cpuFeatures = {};
+  allChunks = [];
+  generating = false;
+  engineSelect.disabled = false;
+  loadBtn.disabled = false;
+  loadBtn.style.display = '';
+  btn.style.display = 'none';
+  quantSelect.disabled = selectedEngine === 'idle';
+  quantSelect.parentElement.style.display = selectedEngine === 'idle' ? 'none' : '';
+  hideProgress();
+  log('Select an engine and load weights.');
+  createWorker();
+}
+
 function formatFeatures(f) {
   // Show every flag with a clear on/off marker. Wasm builds normally
   // only enable simd128, but listing avx/neon/f16c too makes it obvious
@@ -229,7 +293,7 @@ function formatFeatures(f) {
   return 'CPU features: ' + flags.map(k => `${k}=${f[k] ? 'on' : 'off'}`).join(' ');
 }
 
-worker.onmessage = (e) => {
+function handleWorkerMessage(e) {
   const { type, ...data } = e.data;
 
   switch (type) {
@@ -258,9 +322,15 @@ worker.onmessage = (e) => {
     case 'loaded':
       sampleRate = data.sampleRate;
       cpuFeatures = data.features || {};
+      engineSelect.disabled = false;
+      quantSelect.disabled = currentEngine === 'idle';
       loadBtn.style.display = 'none';
       btn.style.display = '';
-      log(`Ready! Enter text and click Generate.\nEmbeddings: ${data.voiceSet}\n${formatFeatures(cpuFeatures)}`);
+      {
+        const engineLine = data.engineLabel ? `Engine: ${data.engineLabel}\n` : '';
+        const featuresLine = Object.keys(cpuFeatures).length ? `\n${formatFeatures(cpuFeatures)}` : '';
+        log(`Ready! Enter text and click Generate.\n${engineLine}Embeddings: ${data.voiceSet}${featuresLine}`);
+      }
       break;
 
     case 'gen_start':
@@ -329,11 +399,13 @@ worker.onmessage = (e) => {
       log('Error: ' + data.message);
       console.error(data.message);
       btn.disabled = false;
+      engineSelect.disabled = false;
+      quantSelect.disabled = currentEngine === 'idle';
       clearCacheBtn.disabled = false;
       generating = false;
       break;
   }
-};
+}
 
 function hookAudioElement(audio) {
   // Set up the audio graph eagerly so it's ready when the user hits play
@@ -362,7 +434,9 @@ function concatenateChunks(chunks) {
 }
 
 function loadWeights() {
+  if (!worker) createWorker();
   loadBtn.disabled = true;
+  engineSelect.disabled = true;
   quantSelect.disabled = true;
   worker.postMessage({
     type: 'load',
@@ -445,6 +519,8 @@ function encodeWav(samples, sampleRate) {
 loadBtn.addEventListener('click', loadWeights);
 clearCacheBtn.addEventListener('click', clearCache);
 btn.addEventListener('click', generate);
+
+resetWorkerForEngine();
 
 // Start the render loop (draws empty bars until audio plays)
 startVisualizer();
