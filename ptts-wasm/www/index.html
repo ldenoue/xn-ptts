@@ -35,7 +35,7 @@
 </head>
 <body>
 
-<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a>, <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a>, or <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a></p>
+<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a>, <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, or <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a></p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -49,6 +49,7 @@
       <option value="xn" selected>xn GGUF q8/f32</option>
       <option value="idle">Candle Q8_0 (128 MiB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
+      <option value="kokoro">Kokoro 82M ORT</option>
     </select>
   </div>
   <div class="section">
@@ -138,6 +139,11 @@ const ENGINE_INFO = {
     type: 'module',
     modelSizeMb: { f32: 240, q8: 146 },
     voiceSizeMb: 46,
+    quantOptions: [
+      ['f32', 'f32'],
+      ['q8', 'q8'],
+    ],
+    defaultQuant: 'q8',
     voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
   },
   idle: {
@@ -145,6 +151,7 @@ const ENGINE_INFO = {
     type: 'module',
     modelSizeMb: { q8: 134 },
     voiceSizeMb: 43,
+    defaultQuant: 'q8',
     voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
   },
   supertonic: {
@@ -152,7 +159,26 @@ const ENGINE_INFO = {
     type: 'classic',
     modelSizeMb: { q8: 401 },
     voiceSizeMb: 0,
+    defaultQuant: 'q8',
     voices: ['F1', 'F2', 'F3', 'F4', 'F5', 'M1', 'M2', 'M3', 'M4', 'M5'],
+  },
+  kokoro: {
+    worker: 'kokoro_ort_worker.js?v=kokoro-js-1.2.1',
+    type: 'module',
+    modelSizeMb: { q8: 92, q4f16: 154, q4: 305 },
+    voiceSizeMb: 1,
+    quantOptions: [
+      ['q8', 'q8 quantized (92MB)'],
+      ['q4f16', 'q4f16 mixed (154MB)'],
+      ['q4', 'q4 matmul (305MB)'],
+    ],
+    defaultQuant: 'q8',
+    voices: [
+      'af_heart', 'af_bella', 'af_nicole', 'af_sarah', 'af_sky',
+      'am_adam', 'am_fenrir', 'am_michael', 'am_puck',
+      'bf_emma', 'bf_isabella', 'bf_alice', 'bf_lily',
+      'bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel',
+    ],
   },
 };
 
@@ -178,7 +204,7 @@ function maybeUpdateSampleText() {
 
 function updateLoadBtnLabel() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
-  const quant = engineSelect.value === 'xn' ? quantSelect.value : 'q8';
+  const quant = engine.quantOptions ? quantSelect.value : engine.defaultQuant || 'q8';
   const modelSize = engine.modelSizeMb[quant] ?? engine.modelSizeMb.q8;
   const totalSize = engine.voiceSizeMb > 0 ? modelSize + engine.voiceSizeMb : modelSize;
   loadBtn.textContent = `Load Weights${engine.voiceSizeMb > 0 ? ' + Voices' : ''} (${totalSize}MB)`;
@@ -188,17 +214,50 @@ function titleCase(value) {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
 
+const VOICE_LABELS = {
+  af_heart: 'Heart (US female)',
+  af_bella: 'Bella (US female)',
+  af_nicole: 'Nicole (US female)',
+  af_sarah: 'Sarah (US female)',
+  af_sky: 'Sky (US female)',
+  am_adam: 'Adam (US male)',
+  am_fenrir: 'Fenrir (US male)',
+  am_michael: 'Michael (US male)',
+  am_puck: 'Puck (US male)',
+  bf_emma: 'Emma (UK female)',
+  bf_isabella: 'Isabella (UK female)',
+  bf_alice: 'Alice (UK female)',
+  bf_lily: 'Lily (UK female)',
+  bm_george: 'George (UK male)',
+  bm_fable: 'Fable (UK male)',
+  bm_lewis: 'Lewis (UK male)',
+  bm_daniel: 'Daniel (UK male)',
+};
+
+function updateQuantOptions() {
+  const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  const options = engine.quantOptions || [[engine.defaultQuant || 'q8', engine.defaultQuant || 'q8']];
+  quantSelect.replaceChildren(...options.map(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    if (value === engine.defaultQuant) option.selected = true;
+    return option;
+  }));
+}
+
 function updateVoiceOptions() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
   voiceSelect.replaceChildren(...engine.voices.map((voice) => {
     const option = document.createElement('option');
     option.value = voice;
-    option.textContent = /^[FM]\d$/.test(voice) ? voice : titleCase(voice);
-    if (voice === (engineSelect.value === 'supertonic' ? 'F5' : 'alba')) option.selected = true;
+    option.textContent = VOICE_LABELS[voice] || (/^[FM]\d$/.test(voice) ? voice : titleCase(voice));
+    if (voice === (engineSelect.value === 'supertonic' ? 'F5' : engineSelect.value === 'kokoro' ? 'af_heart' : 'alba')) option.selected = true;
     return option;
   }));
 }
 engineSelect.addEventListener('change', () => {
+  updateQuantOptions();
   updateVoiceOptions();
   resetWorkerForEngine();
   updateLoadBtnLabel();
@@ -359,8 +418,8 @@ function resetWorkerForEngine() {
   loadBtn.disabled = false;
   loadBtn.style.display = '';
   btn.style.display = 'none';
-  quantSelect.disabled = selectedEngine !== 'xn';
-  quantSelect.parentElement.style.display = selectedEngine === 'xn' ? '' : 'none';
+  quantSelect.disabled = !ENGINE_INFO[selectedEngine]?.quantOptions;
+  quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
   languageSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
   hideProgress();
@@ -379,7 +438,7 @@ function formatFeatures(f) {
 function handleWorkerMessage(e) {
   const raw = e.data || {};
   if (raw.status) {
-    handleSupertonicMessage(raw);
+    handleOrtBlobEngineMessage(raw);
     return;
   }
 
@@ -412,7 +471,7 @@ function handleWorkerMessage(e) {
       sampleRate = data.sampleRate;
       cpuFeatures = data.features || {};
       engineSelect.disabled = false;
-      quantSelect.disabled = currentEngine !== 'xn';
+      quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
       loadBtn.style.display = 'none';
       btn.style.display = '';
       {
@@ -489,33 +548,48 @@ function handleWorkerMessage(e) {
       console.error(data.message);
       btn.disabled = false;
       engineSelect.disabled = false;
-      quantSelect.disabled = currentEngine !== 'xn';
+      quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
       clearCacheBtn.disabled = false;
       generating = false;
       break;
   }
 }
 
-function handleSupertonicMessage(data) {
+function handleOrtBlobEngineMessage(data) {
+  const engineLabel = currentEngine === 'kokoro' ? 'Kokoro 82M ORT' : 'Supertonic 3 ORT';
   switch (data.status) {
     case 'ready':
       clearCacheBtn.disabled = false;
-      if (!generating) log('Supertonic worker ready.');
+      if (!generating) log(`${engineLabel} worker ready.`);
       break;
     case 'progress':
-      log(data.message || 'Loading Supertonic...');
+      if (data.pct >= 0) {
+        log(`${data.message || `Loading ${engineLabel}`}: ${data.pct}%${data.detail ? ` (${data.detail})` : ''}`);
+        showProgress(data.pct);
+      } else {
+        log(data.message || `Loading ${engineLabel}...`);
+      }
       break;
     case 'loaded':
+      hideProgress();
       sampleRate = data.sampleRate || 24000;
       engineSelect.disabled = false;
-      quantSelect.disabled = true;
+      quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
       loadBtn.style.display = 'none';
       btn.style.display = '';
-      log(`Ready! Enter text and click Generate.\nEngine: Supertonic 3 ORT (${data.backend?.toUpperCase() || 'WASM'})\nLanguage: ${languageSelect.options[languageSelect.selectedIndex].text}\nSteps: ${stepsSelect.value}`);
+      {
+        const langLine = currentEngine === 'supertonic'
+          ? `\nLanguage: ${languageSelect.options[languageSelect.selectedIndex].text}\nSteps: ${stepsSelect.value}`
+          : '';
+        const quantLine = data.dtype ? `\nQuantization: ${data.dtype}` : '';
+        log(`Ready! Enter text and click Generate.\nEngine: ${engineLabel} (${data.backend?.toUpperCase() || 'WASM'})${quantLine}${langLine}`);
+      }
       break;
     case 'complete': {
+      hideProgress();
       const totalMs = performance.now() - startTime;
-      log(`Generated Supertonic audio in ${(totalMs / 1000).toFixed(2)}s.`);
+      const durationLine = data.durationSec ? ` (${data.durationSec.toFixed(2)}s audio)` : '';
+      log(`Generated ${engineLabel} audio in ${(totalMs / 1000).toFixed(2)}s${durationLine}.`);
       const container = document.getElementById('audio-container');
       container.innerHTML = '';
       const audio = document.createElement('audio');
@@ -528,18 +602,19 @@ function handleSupertonicMessage(data) {
       break;
     }
     case 'cached':
-      log('Supertonic model cached.');
+      log(`${engineLabel} model cached.`);
       break;
     case 'canceled':
-      log('Supertonic generation canceled.');
+      log(`${engineLabel} generation canceled.`);
       btn.disabled = false;
       generating = false;
       break;
     case 'error':
-      log('Error: ' + (data.error || 'Supertonic failed'));
+      hideProgress();
+      log('Error: ' + (data.error || `${engineLabel} failed`));
       btn.disabled = false;
       engineSelect.disabled = false;
-      quantSelect.disabled = true;
+      quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
       clearCacheBtn.disabled = false;
       generating = false;
       break;
@@ -584,6 +659,13 @@ function loadWeights() {
       voice: voiceSelect.value,
       lang: languageSelect.value,
     });
+  } else if (currentEngine === 'kokoro') {
+    worker.postMessage({
+      command: 'load',
+      backend: 'wasm',
+      voice: voiceSelect.value,
+      dtype: quantSelect.value,
+    });
   } else {
     worker.postMessage({
       type: 'load',
@@ -595,7 +677,7 @@ function loadWeights() {
 
 function clearCache() {
   clearCacheBtn.disabled = true;
-  if (currentEngine === 'supertonic') {
+  if (currentEngine === 'supertonic' || currentEngine === 'kokoro') {
     worker.postMessage({ command: 'clear-cache' });
   } else {
     worker.postMessage({ type: 'clear_cache' });
@@ -631,6 +713,16 @@ function generate() {
       backend: 'wasm',
       steps: Number(stepsSelect.value),
       speed: 1.1,
+      requestId: `${Date.now()}`,
+    });
+  } else if (currentEngine === 'kokoro') {
+    worker.postMessage({
+      command: 'tts',
+      text,
+      voice: voiceSelect.value,
+      backend: 'wasm',
+      dtype: quantSelect.value,
+      speed: 1,
       requestId: `${Date.now()}`,
     });
   } else {
@@ -685,6 +777,7 @@ loadBtn.addEventListener('click', loadWeights);
 clearCacheBtn.addEventListener('click', clearCache);
 btn.addEventListener('click', generate);
 
+updateQuantOptions();
 updateVoiceOptions();
 resetWorkerForEngine();
 

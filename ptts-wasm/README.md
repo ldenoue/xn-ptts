@@ -43,6 +43,13 @@ built-in voice files in the browser Cache API, so later loads can reuse those
 blobs without re-downloading them. Use the page's Clear Cache button to remove
 those cached assets.
 
+The page also includes optional ONNX Runtime engines for Supertonic 3 and
+Kokoro 82M. Kokoro runs through `kokoro-js` on the WASM backend and defaults to
+the q8 ONNX weights (~92 MB plus the selected voice). Additional Kokoro
+quantized choices are exposed in the UI for q4f16 and q4. The Kokoro browser
+path currently exposes the English US/UK voices supported by `kokoro-js`; use
+Supertonic for the multilingual language selector.
+
 ## Todo
 
 - Handle long prompts, see `split_into_best_sentences` in
