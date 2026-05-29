@@ -35,7 +35,7 @@
 </head>
 <body>
 
-<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a> or <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a></p>
+<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a>, <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a>, or <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a></p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -48,6 +48,7 @@
     <select id="engine">
       <option value="xn" selected>xn GGUF q8/f32</option>
       <option value="idle">Candle Q8_0 (128 MiB)</option>
+      <option value="supertonic">Supertonic 3 ORT</option>
     </select>
   </div>
   <div class="section">
@@ -67,6 +68,30 @@
     <select id="quant">
       <option value="f32">f32</option>
       <option value="q8" selected>q8</option>
+    </select>
+  </div>
+  <div class="section" id="language-section" style="display:none">
+    <label for="language">Language</label>
+    <select id="language">
+      <option value="ar" selected>Arabic</option>
+      <option value="en">English</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="pt">Portuguese</option>
+      <option value="it">Italian</option>
+      <option value="es">Spanish</option>
+    </select>
+  </div>
+  <div class="section" id="steps-section" style="display:none">
+    <label for="steps">Steps</label>
+    <select id="steps">
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5" selected>5</option>
+      <option value="6">6</option>
+      <option value="8">8</option>
+      <option value="10">10</option>
     </select>
   </div>
   <button id="load-btn">Load Weights (146MB)</button>
@@ -91,12 +116,17 @@ const btn = document.getElementById('generate-btn');
 const engineSelect = document.getElementById('engine');
 const voiceSelect = document.getElementById('voice');
 const quantSelect = document.getElementById('quant');
+const languageSection = document.getElementById('language-section');
+const languageSelect = document.getElementById('language');
+const stepsSection = document.getElementById('steps-section');
+const stepsSelect = document.getElementById('steps');
 const progressBar = document.getElementById('progress-bar');
 const progressFill = document.getElementById('progress-fill');
 const canvas = document.getElementById('visualizer');
 const canvasCtx = canvas.getContext('2d');
 const tempSlider = document.getElementById('temperature');
 const tempValue = document.getElementById('temp-value');
+const textInput = document.getElementById('text');
 
 tempSlider.addEventListener('input', () => {
   tempValue.textContent = tempSlider.value;
@@ -105,26 +135,76 @@ tempSlider.addEventListener('input', () => {
 const ENGINE_INFO = {
   xn: {
     worker: 'worker.js?v=simd128-no-relaxed-simd',
+    type: 'module',
     modelSizeMb: { f32: 240, q8: 146 },
     voiceSizeMb: 46,
+    voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
   },
   idle: {
     worker: 'idle_worker.js?v=idle-candle-q8',
+    type: 'module',
     modelSizeMb: { q8: 134 },
     voiceSizeMb: 43,
+    voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
+  },
+  supertonic: {
+    worker: 'supertonic_ort_worker.js?v=supertonic3&backend=wasm',
+    type: 'classic',
+    modelSizeMb: { q8: 401 },
+    voiceSizeMb: 0,
+    voices: ['F1', 'F2', 'F3', 'F4', 'F5', 'M1', 'M2', 'M3', 'M4', 'M5'],
   },
 };
 
+const SAMPLE_TEXT = {
+  en: 'This is a test for the pocket text to speech system, showing great audio with only 100 million parameters.',
+  ar: 'هذا اختبار لنظام تحويل النص إلى كلام، يوضح جودة صوت رائعة باستخدام مئة مليون معامل فقط.',
+  fr: 'Ceci est un test du système de synthèse vocale, qui montre un son excellent avec seulement cent millions de paramètres.',
+  de: 'Dies ist ein Test des Text-zu-Sprache-Systems und zeigt großartigen Klang mit nur hundert Millionen Parametern.',
+  pt: 'Este é um teste do sistema de conversão de texto em fala, mostrando áudio excelente com apenas cem milhões de parâmetros.',
+  it: 'Questo è un test del sistema di sintesi vocale, che mostra un audio eccellente con solo cento milioni di parametri.',
+  es: 'Esta es una prueba del sistema de texto a voz, que muestra un audio excelente con solo cien millones de parámetros.',
+};
+
+function isSampleText(value) {
+  return Object.values(SAMPLE_TEXT).includes(value.trim());
+}
+
+function maybeUpdateSampleText() {
+  if (!isSampleText(textInput.value)) return;
+  const lang = engineSelect.value === 'supertonic' ? languageSelect.value : 'en';
+  textInput.value = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
+}
+
 function updateLoadBtnLabel() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
-  const quant = engineSelect.value === 'idle' ? 'q8' : quantSelect.value;
+  const quant = engineSelect.value === 'xn' ? quantSelect.value : 'q8';
   const modelSize = engine.modelSizeMb[quant] ?? engine.modelSizeMb.q8;
-  loadBtn.textContent = `Load Weights + Voices (${modelSize + engine.voiceSizeMb}MB)`;
+  const totalSize = engine.voiceSizeMb > 0 ? modelSize + engine.voiceSizeMb : modelSize;
+  loadBtn.textContent = `Load Weights${engine.voiceSizeMb > 0 ? ' + Voices' : ''} (${totalSize}MB)`;
+}
+
+function titleCase(value) {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function updateVoiceOptions() {
+  const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  voiceSelect.replaceChildren(...engine.voices.map((voice) => {
+    const option = document.createElement('option');
+    option.value = voice;
+    option.textContent = /^[FM]\d$/.test(voice) ? voice : titleCase(voice);
+    if (voice === (engineSelect.value === 'supertonic' ? 'F5' : 'alba')) option.selected = true;
+    return option;
+  }));
 }
 engineSelect.addEventListener('change', () => {
+  updateVoiceOptions();
   resetWorkerForEngine();
   updateLoadBtnLabel();
+  maybeUpdateSampleText();
 });
+languageSelect.addEventListener('change', maybeUpdateSampleText);
 quantSelect.addEventListener('change', updateLoadBtnLabel);
 updateLoadBtnLabel();
 
@@ -249,20 +329,21 @@ let cpuFeatures = {};
 
 function createWorker() {
   currentEngine = engineSelect.value;
-  worker = new Worker(ENGINE_INFO[currentEngine].worker, { type: 'module' });
+  const engine = ENGINE_INFO[currentEngine];
+  worker = new Worker(engine.worker, { type: engine.type || 'module' });
   worker.onmessage = handleWorkerMessage;
   worker.onerror = (event) => {
     const detail = event.message || 'Worker failed to start';
     log(`Error: ${currentEngine} worker failed to start: ${detail}`);
     loadBtn.disabled = false;
     engineSelect.disabled = false;
-    quantSelect.disabled = currentEngine === 'idle';
+    quantSelect.disabled = currentEngine !== 'xn';
   };
   worker.onmessageerror = () => {
     log(`Error: ${currentEngine} worker sent an unreadable message.`);
     loadBtn.disabled = false;
     engineSelect.disabled = false;
-    quantSelect.disabled = currentEngine === 'idle';
+    quantSelect.disabled = currentEngine !== 'xn';
   };
 }
 
@@ -278,8 +359,10 @@ function resetWorkerForEngine() {
   loadBtn.disabled = false;
   loadBtn.style.display = '';
   btn.style.display = 'none';
-  quantSelect.disabled = selectedEngine === 'idle';
-  quantSelect.parentElement.style.display = selectedEngine === 'idle' ? 'none' : '';
+  quantSelect.disabled = selectedEngine !== 'xn';
+  quantSelect.parentElement.style.display = selectedEngine === 'xn' ? '' : 'none';
+  languageSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
+  stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
   createWorker();
@@ -294,7 +377,13 @@ function formatFeatures(f) {
 }
 
 function handleWorkerMessage(e) {
-  const { type, ...data } = e.data;
+  const raw = e.data || {};
+  if (raw.status) {
+    handleSupertonicMessage(raw);
+    return;
+  }
+
+  const { type, ...data } = raw;
 
   switch (type) {
     case 'status':
@@ -323,7 +412,7 @@ function handleWorkerMessage(e) {
       sampleRate = data.sampleRate;
       cpuFeatures = data.features || {};
       engineSelect.disabled = false;
-      quantSelect.disabled = currentEngine === 'idle';
+      quantSelect.disabled = currentEngine !== 'xn';
       loadBtn.style.display = 'none';
       btn.style.display = '';
       {
@@ -400,7 +489,57 @@ function handleWorkerMessage(e) {
       console.error(data.message);
       btn.disabled = false;
       engineSelect.disabled = false;
-      quantSelect.disabled = currentEngine === 'idle';
+      quantSelect.disabled = currentEngine !== 'xn';
+      clearCacheBtn.disabled = false;
+      generating = false;
+      break;
+  }
+}
+
+function handleSupertonicMessage(data) {
+  switch (data.status) {
+    case 'ready':
+      clearCacheBtn.disabled = false;
+      if (!generating) log('Supertonic worker ready.');
+      break;
+    case 'progress':
+      log(data.message || 'Loading Supertonic...');
+      break;
+    case 'loaded':
+      sampleRate = data.sampleRate || 24000;
+      engineSelect.disabled = false;
+      quantSelect.disabled = true;
+      loadBtn.style.display = 'none';
+      btn.style.display = '';
+      log(`Ready! Enter text and click Generate.\nEngine: Supertonic 3 ORT (${data.backend?.toUpperCase() || 'WASM'})\nLanguage: ${languageSelect.options[languageSelect.selectedIndex].text}\nSteps: ${stepsSelect.value}`);
+      break;
+    case 'complete': {
+      const totalMs = performance.now() - startTime;
+      log(`Generated Supertonic audio in ${(totalMs / 1000).toFixed(2)}s.`);
+      const container = document.getElementById('audio-container');
+      container.innerHTML = '';
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.src = URL.createObjectURL(data.audio);
+      container.appendChild(audio);
+      hookAudioElement(audio);
+      btn.disabled = false;
+      generating = false;
+      break;
+    }
+    case 'cached':
+      log('Supertonic model cached.');
+      break;
+    case 'canceled':
+      log('Supertonic generation canceled.');
+      btn.disabled = false;
+      generating = false;
+      break;
+    case 'error':
+      log('Error: ' + (data.error || 'Supertonic failed'));
+      btn.disabled = false;
+      engineSelect.disabled = false;
+      quantSelect.disabled = true;
       clearCacheBtn.disabled = false;
       generating = false;
       break;
@@ -438,16 +577,29 @@ function loadWeights() {
   loadBtn.disabled = true;
   engineSelect.disabled = true;
   quantSelect.disabled = true;
-  worker.postMessage({
-    type: 'load',
-    voiceName: voiceSelect.value,
-    quant: quantSelect.value,
-  });
+  if (currentEngine === 'supertonic') {
+    worker.postMessage({
+      command: 'load',
+      backend: 'wasm',
+      voice: voiceSelect.value,
+      lang: languageSelect.value,
+    });
+  } else {
+    worker.postMessage({
+      type: 'load',
+      voiceName: voiceSelect.value,
+      quant: quantSelect.value,
+    });
+  }
 }
 
 function clearCache() {
   clearCacheBtn.disabled = true;
-  worker.postMessage({ type: 'clear_cache' });
+  if (currentEngine === 'supertonic') {
+    worker.postMessage({ command: 'clear-cache' });
+  } else {
+    worker.postMessage({ type: 'clear_cache' });
+  }
 }
 
 function generate() {
@@ -470,12 +622,25 @@ function generate() {
   analyser.connect(audioCtx.destination);
   startVisualizer();
 
-  worker.postMessage({
-    type: 'generate',
-    text,
-    voiceName: voiceSelect.value,
-    temperature: parseFloat(tempSlider.value),
-  });
+  if (currentEngine === 'supertonic') {
+    worker.postMessage({
+      command: 'tts',
+      text,
+      voice: voiceSelect.value,
+      lang: languageSelect.value,
+      backend: 'wasm',
+      steps: Number(stepsSelect.value),
+      speed: 1.1,
+      requestId: `${Date.now()}`,
+    });
+  } else {
+    worker.postMessage({
+      type: 'generate',
+      text,
+      voiceName: voiceSelect.value,
+      temperature: parseFloat(tempSlider.value),
+    });
+  }
 }
 
 function encodeWav(samples, sampleRate) {
@@ -520,6 +685,7 @@ loadBtn.addEventListener('click', loadWeights);
 clearCacheBtn.addEventListener('click', clearCache);
 btn.addEventListener('click', generate);
 
+updateVoiceOptions();
 resetWorkerForEngine();
 
 // Start the render loop (draws empty bars until audio plays)
