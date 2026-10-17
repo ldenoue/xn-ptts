@@ -43,12 +43,20 @@ built-in voice files in the browser Cache API, so later loads can reuse those
 blobs without re-downloading them. Use the page's Clear Cache button to remove
 those cached assets.
 
-The page also includes optional ONNX Runtime engines for Supertonic 3 and
-Kokoro 82M. Kokoro runs through `kokoro-js` on the WASM backend and defaults to
-the q8 ONNX weights (~92 MB plus the selected voice). Additional Kokoro
-quantized choices are exposed in the UI for q4f16 and q4. The Kokoro browser
-path currently exposes the English US/UK voices supported by `kokoro-js`; use
-Supertonic for the multilingual language selector.
+The page also includes an optional Candle Q8_0 engine from
+[`idle-intelligence/tts-web`](https://github.com/idle-intelligence/tts-web).
+It supports English, French, German, Spanish, Portuguese, and Italian, with a
+separate ~134 MB model per language and voices downloaded on demand. Its
+checked-in WASM artifacts were built from upstream revision
+`4ac4680af1dbe02dfbc78bf85f51e8523d614caf`; see
+[`IDLE_TTS_WEB_LICENSE`](IDLE_TTS_WEB_LICENSE) for its MIT license.
+
+The other optional engines use ONNX Runtime for Supertonic 3 and Kokoro 82M.
+Kokoro runs through `kokoro-js` on the WASM backend and defaults to the q8 ONNX
+weights (~92 MB plus the selected voice). Additional Kokoro quantized choices
+are exposed in the UI for q4f16 and q4. The Kokoro browser path currently
+exposes the English US/UK voices supported by `kokoro-js`; Supertonic also has
+a multilingual language selector.
 
 ## Todo
 

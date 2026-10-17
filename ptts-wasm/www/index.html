@@ -47,7 +47,7 @@
     <label for="engine">Engine</label>
     <select id="engine">
       <option value="xn" selected>xn GGUF q8/f32</option>
-      <option value="idle">Candle Q8_0 (128 MiB)</option>
+      <option value="idle">Candle Q8_0 multilingual (134 MB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
       <option value="kokoro">Kokoro 82M ORT</option>
     </select>
@@ -74,13 +74,7 @@
   <div class="section" id="language-section" style="display:none">
     <label for="language">Language</label>
     <select id="language">
-      <option value="ar" selected>Arabic</option>
       <option value="en">English</option>
-      <option value="fr">French</option>
-      <option value="de">German</option>
-      <option value="pt">Portuguese</option>
-      <option value="it">Italian</option>
-      <option value="es">Spanish</option>
     </select>
   </div>
   <div class="section" id="steps-section" style="display:none">
@@ -147,12 +141,34 @@ const ENGINE_INFO = {
     voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
   },
   idle: {
-    worker: 'idle_worker.js?v=idle-candle-q8',
+    worker: 'idle_worker.js?v=idle-candle-multilingual-v1',
     type: 'module',
     modelSizeMb: { q8: 134 },
-    voiceSizeMb: 43,
+    voiceSizeMb: 8,
     defaultQuant: 'q8',
-    voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
+    languages: [
+      { value: 'english', label: 'English', sample: 'en' },
+      { value: 'french', label: 'French', sample: 'fr' },
+      { value: 'german', label: 'German', sample: 'de' },
+      { value: 'spanish', label: 'Spanish', sample: 'es' },
+      { value: 'portuguese', label: 'Portuguese', sample: 'pt' },
+      { value: 'italian', label: 'Italian', sample: 'it' },
+    ],
+    defaultLanguage: 'english',
+    defaultVoices: {
+      english: 'alba',
+      french: 'estelle',
+      german: 'juergen',
+      spanish: 'lola',
+      portuguese: 'rafael',
+      italian: 'giovanni',
+    },
+    voices: [
+      'alba', 'bill_boerst', 'anna', 'charles', 'azelma', 'george', 'caro_davy',
+      'giovanni', 'cosette', 'javert', 'eponine', 'jean', 'estelle', 'juergen',
+      'eve', 'marius', 'fantine', 'michael', 'jane', 'paul', 'lola',
+      'peter_yearsley', 'mary', 'rafael', 'vera', 'stuart_bell',
+    ],
   },
   supertonic: {
     worker: 'supertonic_ort_worker.js?v=supertonic3&backend=wasm',
@@ -160,6 +176,16 @@ const ENGINE_INFO = {
     modelSizeMb: { q8: 401 },
     voiceSizeMb: 0,
     defaultQuant: 'q8',
+    languages: [
+      { value: 'ar', label: 'Arabic', sample: 'ar' },
+      { value: 'en', label: 'English', sample: 'en' },
+      { value: 'fr', label: 'French', sample: 'fr' },
+      { value: 'de', label: 'German', sample: 'de' },
+      { value: 'pt', label: 'Portuguese', sample: 'pt' },
+      { value: 'it', label: 'Italian', sample: 'it' },
+      { value: 'es', label: 'Spanish', sample: 'es' },
+    ],
+    defaultLanguage: 'ar',
     voices: ['F1', 'F2', 'F3', 'F4', 'F5', 'M1', 'M2', 'M3', 'M4', 'M5'],
   },
   kokoro: {
@@ -198,7 +224,8 @@ function isSampleText(value) {
 
 function maybeUpdateSampleText() {
   if (!isSampleText(textInput.value)) return;
-  const lang = engineSelect.value === 'supertonic' ? languageSelect.value : 'en';
+  const selectedLanguage = languageSelect.options[languageSelect.selectedIndex];
+  const lang = selectedLanguage?.dataset.sample || 'en';
   textInput.value = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
 }
 
@@ -246,24 +273,45 @@ function updateQuantOptions() {
   }));
 }
 
+function updateLanguageOptions() {
+  const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  const languages = engine.languages || [];
+  languageSelect.replaceChildren(...languages.map(({ value, label, sample }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    option.dataset.sample = sample;
+    if (value === engine.defaultLanguage) option.selected = true;
+    return option;
+  }));
+}
+
 function updateVoiceOptions() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  const defaultVoice = engine.defaultVoices?.[languageSelect.value]
+    || (engineSelect.value === 'supertonic' ? 'F5' : engineSelect.value === 'kokoro' ? 'af_heart' : 'alba');
   voiceSelect.replaceChildren(...engine.voices.map((voice) => {
     const option = document.createElement('option');
     option.value = voice;
     option.textContent = VOICE_LABELS[voice] || (/^[FM]\d$/.test(voice) ? voice : titleCase(voice));
-    if (voice === (engineSelect.value === 'supertonic' ? 'F5' : engineSelect.value === 'kokoro' ? 'af_heart' : 'alba')) option.selected = true;
+    if (voice === defaultVoice) option.selected = true;
     return option;
   }));
 }
 engineSelect.addEventListener('change', () => {
   updateQuantOptions();
+  updateLanguageOptions();
   updateVoiceOptions();
   resetWorkerForEngine();
   updateLoadBtnLabel();
   maybeUpdateSampleText();
 });
-languageSelect.addEventListener('change', maybeUpdateSampleText);
+languageSelect.addEventListener('change', () => {
+  maybeUpdateSampleText();
+  updateVoiceOptions();
+  updateLoadBtnLabel();
+  if (engineSelect.value === 'idle') resetWorkerForEngine();
+});
 quantSelect.addEventListener('change', updateLoadBtnLabel);
 updateLoadBtnLabel();
 
@@ -420,7 +468,7 @@ function resetWorkerForEngine() {
   btn.style.display = 'none';
   quantSelect.disabled = !ENGINE_INFO[selectedEngine]?.quantOptions;
   quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
-  languageSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
+  languageSection.style.display = ENGINE_INFO[selectedEngine]?.languages ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
@@ -671,6 +719,7 @@ function loadWeights() {
       type: 'load',
       voiceName: voiceSelect.value,
       quant: quantSelect.value,
+      language: currentEngine === 'idle' ? languageSelect.value : undefined,
     });
   }
 }
@@ -778,6 +827,7 @@ clearCacheBtn.addEventListener('click', clearCache);
 btn.addEventListener('click', generate);
 
 updateQuantOptions();
+updateLanguageOptions();
 updateVoiceOptions();
 resetWorkerForEngine();
 
