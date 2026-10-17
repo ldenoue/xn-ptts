@@ -1,4 +1,4 @@
-import init, { Model, Tokenizer } from './idle_tts_wasm.js';
+import init, { Model, Tokenizer } from './idle_tts_wasm.js?v=idle-candle-multilingual-v2';
 
 const HF_BASE = 'https://huggingface.co/idle-intelligence/pocket-tts-gguf/resolve/main';
 // Voice KV caches must match the exact Pocket TTS revision used for the GGUF files.
@@ -131,7 +131,7 @@ async function handleLoad(selectedLanguage, voiceName) {
   if (!SUPPORTED_LANGUAGES.has(language)) throw new Error(`Unsupported Idle language: ${language}`);
   voiceIndexMap = {};
 
-  await init('./idle_tts_wasm_bg.wasm');
+  await init('./idle_tts_wasm_bg.wasm?v=idle-candle-multilingual-v2');
   post('status', { message: 'Candle WASM initialized. Loading tokenizer and model...' });
 
   const tokData = await fetchCachedBytes(tokenizerUrl(), `Idle ${language} tokenizer`);
