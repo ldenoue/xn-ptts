@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pocket TTS - WebAssembly Demo</title>
+<title>Tiny TTS Browser Lab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔊</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; background: #111; color: #ddd; }
@@ -35,18 +36,23 @@
 </head>
 <body>
 
-<p class="subtitle"><a href="https://github.com/kyutai-labs/pocket-tts" target="_blank"> Pocket TTS</a> running in the browser via WebAssembly using <a href="https://github.com/LaurentMazare/xn" target="_blank">LaurentMazare/xn</a>, <a href="https://github.com/idle-intelligence/tts-web" target="_blank">idle-intelligence/tts-web</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, or <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a></p>
+<h1>Tiny TTS Browser Lab</h1>
+<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device.</p>
 
 <div class="section">
   <label for="text">Text to speak</label>
-  <textarea id="text" rows="3">This is a test for the pocket text to speech system, showing great audio with only 100 million parameters.</textarea>
+  <textarea id="text" rows="3">Hello from Phonon, running entirely in your browser.</textarea>
 </div>
 
 <div class="controls">
   <div class="section">
     <label for="engine">Engine</label>
     <select id="engine">
-      <option value="xn" selected>xn GGUF q8/f32</option>
+      <option value="xn">xn GGUF q8/f32</option>
+      <option value="phonon" selected>Phonon 31m q8/f32</option>
+      <option value="phonon40">Phonon 40m q8</option>
+      <option value="phonon40multi">Phonon 40m multilingual q8</option>
+      <option value="pivo">PiVo 1.4M ORT</option>
       <option value="idle">Candle Q8_0 multilingual (134 MB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
       <option value="kokoro">Kokoro 82M ORT</option>
@@ -92,9 +98,13 @@
   <button id="load-btn">Load Weights (146MB)</button>
   <button id="clear-cache-btn" class="secondary-btn">Clear Cache</button>
   <button id="generate-btn" style="display:none">Generate</button>
-  <div class="slider-section">
+  <div class="slider-section" id="temperature-section">
     <label for="temperature">Temperature <span id="temp-value" class="slider-value">0.7</span></label>
     <input type="range" id="temperature" min="0.1" max="1.0" step="0.1" value="0.7">
+  </div>
+  <div class="slider-section" id="speed-section" style="display:none">
+    <label for="speed">Speed <span id="speed-value" class="slider-value">1.0×</span></label>
+    <input type="range" id="speed" min="0.5" max="2.0" step="0.1" value="1.0">
   </div>
 </div>
 
@@ -121,11 +131,58 @@ const canvas = document.getElementById('visualizer');
 const canvasCtx = canvas.getContext('2d');
 const tempSlider = document.getElementById('temperature');
 const tempValue = document.getElementById('temp-value');
+const temperatureSection = document.getElementById('temperature-section');
+const speedSection = document.getElementById('speed-section');
+const speedSlider = document.getElementById('speed');
+const speedValue = document.getElementById('speed-value');
 const textInput = document.getElementById('text');
 
 tempSlider.addEventListener('input', () => {
   tempValue.textContent = tempSlider.value;
 });
+speedSlider.addEventListener('input', () => {
+  speedValue.textContent = `${Number(speedSlider.value).toFixed(1)}×`;
+});
+
+const PHONON_VOICE_ROOT = 'https://huggingface.co/gradium/phonon-voices/resolve/0ee17205f254b5abc43b266c8a0f215565c352f7/voices';
+const phononVoice = (value, label, file) => ({ value, label, url: `${PHONON_VOICE_ROOT}/${file}.safetensors` });
+const PHONON_VOICES = {
+  en: [
+    { value: 'default', label: 'Default (checkpoint)' },
+    phononVoice('Zoey', 'Zoey (US female)', 'NbpkqMVS3CJeq2j8'),
+    phononVoice('Juniper', 'Juniper (US female)', 'NIWIOv5vTi5eRMj8'),
+    phononVoice('Easton', 'Easton (US male)', 'LMDIYE0Oa377Qh6Z'),
+    phononVoice('Micah', 'Micah (US male)', '40QrMVgAxFiUnP9f'),
+  ],
+  fr: [
+    { value: 'default', label: 'Default (checkpoint)' },
+    phononVoice('Noémie', 'Noémie (female)', 'FXxJ9mANRq6BCTX5'),
+    phononVoice('Coralie', 'Coralie (female)', 'ZeSg853xFACESHHI'),
+    phononVoice('Augustin', 'Augustin (male)', 'Tek4tJXiX6_yvXq7'),
+    phononVoice('Arnaud', 'Arnaud (male)', 'aXMVwiUhITMrwPzd'),
+  ],
+  de: [
+    { value: 'default', label: 'Default (checkpoint)' },
+    phononVoice('Nele', 'Nele (female)', '2A2fFf8SkDEJ8nzx'),
+    phononVoice('Annika', 'Annika (female)', 'p6Uutkyi3j2iNAUu'),
+    phononVoice('Anton', 'Anton (male)', '3ZKKapPOvuWFcw9f'),
+    phononVoice('Mirko', 'Mirko (male)', 'Xn9xDzqSSr4xGTNg'),
+  ],
+  es: [
+    { value: 'default', label: 'Default (checkpoint)' },
+    phononVoice('Noa', 'Noa (female)', 'b6FvJAiokjdqIti4'),
+    phononVoice('Celia', 'Celia (female)', 'rmLBOdHrfkFym9MM'),
+    phononVoice('Marcos', 'Marcos (male)', 'jvPx8j8zLGQ3utZz'),
+    phononVoice('Borja', 'Borja (male)', 'tIjCgP8v3RY8UpgM'),
+  ],
+  pt: [
+    { value: 'default', label: 'Default (checkpoint)' },
+    phononVoice('Manuela-Lu', 'Manuela-Lu (female)', 'KgC2Nqnjj48NUiyV'),
+    phononVoice('Isadora', 'Isadora (female)', 'CtNvKUUMrx1h56ih'),
+    phononVoice('Davi', 'Davi (male)', 'NuUr_x5V90hSHzCJ'),
+    phononVoice('Igor', 'Igor (male)', 'l7520SIXi14iEamd'),
+  ],
+};
 
 const ENGINE_INFO = {
   xn: {
@@ -139,6 +196,89 @@ const ENGINE_INFO = {
     ],
     defaultQuant: 'q8',
     voices: ['alba', 'marius', 'javert', 'fantine', 'cosette', 'eponine', 'azelma'],
+  },
+  phonon: {
+    label: 'Phonon 31m',
+    worker: 'phonon_worker.js?v=phonon-tts-0.6.0',
+    type: 'module',
+    modelSizeMb: { f32: 103, q8: 65 },
+    voiceSizeMb: 0,
+    quantOptions: [
+      ['f32', 'f32'],
+      ['q8', 'q8'],
+    ],
+    defaultQuant: 'q8',
+    languages: [
+      { value: 'en', label: 'English', sample: 'phonon' },
+    ],
+    defaultLanguage: 'en',
+    defaultVoices: { en: 'default' },
+    voicesByLanguage: PHONON_VOICES,
+    voices: ['default'],
+  },
+  phonon40: {
+    label: 'Phonon 40m',
+    worker: 'phonon_worker.js?v=phonon-tts-0.6.0',
+    type: 'module',
+    models: {
+      en: 'hf://ldenoue/phonon-40m-en@d6bddbc82c1674cc3fdf81f164fd239687f0e54d',
+      fr: 'hf://ldenoue/phonon-40m-fr@2aa111b62e40b3a4411d3b3892bfff3bea7bdffb',
+      de: 'hf://ldenoue/phonon-40m-de@2b1b7b73dc7f7de43a9468eb4f29c17398c878a2',
+      es: 'hf://ldenoue/phonon-40m-es@accdd9f449d31108c24bab0ba122dab61f0ec7f0',
+      pt: 'hf://ldenoue/phonon-40m-pt@9bb5b952dc8643cc4bba2854271bd3a00666bdf6',
+    },
+    modelSizeMb: { q8: 75 },
+    voiceSizeMb: 0,
+    defaultQuant: 'q8',
+    languages: [
+      { value: 'en', label: 'English', sample: 'phonon40' },
+      { value: 'fr', label: 'French', sample: 'fr' },
+      { value: 'de', label: 'German', sample: 'de' },
+      { value: 'es', label: 'Spanish', sample: 'es' },
+      { value: 'pt', label: 'Portuguese', sample: 'pt' },
+    ],
+    defaultLanguage: 'en',
+    defaultVoices: {
+      en: 'default', fr: 'default', de: 'default', es: 'default', pt: 'default',
+    },
+    voicesByLanguage: PHONON_VOICES,
+    voices: ['default'],
+  },
+  phonon40multi: {
+    label: 'Phonon 40m multilingual',
+    worker: 'phonon_worker.js?v=phonon-tts-0.6.0',
+    type: 'module',
+    model: 'hf://ldenoue/phonon-40m-multilingual@d7d7564f9f4ce51d71e80b712d5e7d6e6c8fc047',
+    modelSizeMb: { q8: 75 },
+    voiceSizeMb: 0,
+    defaultQuant: 'q8',
+    languages: [
+      { value: 'en', label: 'English', sample: 'en' },
+      { value: 'fr', label: 'French', sample: 'fr' },
+      { value: 'de', label: 'German', sample: 'de' },
+      { value: 'es', label: 'Spanish', sample: 'es' },
+      { value: 'pt', label: 'Portuguese', sample: 'pt' },
+    ],
+    defaultLanguage: 'en',
+    defaultVoices: {
+      en: 'default', fr: 'default', de: 'default', es: 'default', pt: 'default',
+    },
+    voicesByLanguage: PHONON_VOICES,
+    voices: ['default'],
+  },
+  pivo: {
+    label: 'PiVo 1.4M ORT',
+    worker: 'pivo_worker.js?v=pivo-1.4m-ort-1.23.2',
+    type: 'module',
+    modelSizeMb: { f32: 9.4 },
+    voiceSizeMb: 0,
+    defaultQuant: 'f32',
+    languages: [
+      { value: 'en', label: 'English', sample: 'pivo' },
+    ],
+    defaultLanguage: 'en',
+    defaultVoices: { en: 'Pi' },
+    voices: ['Pi', 'Vo'],
   },
   idle: {
     worker: 'idle_worker.js?v=idle-candle-multilingual-v2',
@@ -210,6 +350,9 @@ const ENGINE_INFO = {
 
 const SAMPLE_TEXT = {
   en: 'This is a test for the pocket text to speech system, showing great audio with only 100 million parameters.',
+  phonon: 'Hello from Phonon, running entirely in your browser.',
+  phonon40: 'Hello from Phonon 40m, streaming speech locally in your browser.',
+  pivo: 'Hello from Pi Vo, a tiny 1.4 million parameter voice running in your browser.',
   ar: 'هذا اختبار لنظام تحويل النص إلى كلام، يوضح جودة صوت رائعة باستخدام مئة مليون معامل فقط.',
   fr: 'Ceci est un test du système de synthèse vocale, qui montre un son excellent avec seulement cent millions de paramètres.',
   de: 'Dies ist ein Test des Text-zu-Sprache-Systems und zeigt großartigen Klang mit nur hundert Millionen Parametern.',
@@ -288,12 +431,17 @@ function updateLanguageOptions() {
 
 function updateVoiceOptions() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
+  const voices = engine.voicesByLanguage?.[languageSelect.value] || engine.voices;
   const defaultVoice = engine.defaultVoices?.[languageSelect.value]
     || (engineSelect.value === 'supertonic' ? 'F5' : engineSelect.value === 'kokoro' ? 'af_heart' : 'alba');
-  voiceSelect.replaceChildren(...engine.voices.map((voice) => {
+  voiceSelect.replaceChildren(...voices.map((entry) => {
+    const voice = typeof entry === 'string' ? entry : entry.value;
     const option = document.createElement('option');
     option.value = voice;
-    option.textContent = VOICE_LABELS[voice] || (/^[FM]\d$/.test(voice) ? voice : titleCase(voice));
+    option.textContent = typeof entry === 'string'
+      ? VOICE_LABELS[voice] || (/^[FM]\d$/.test(voice) ? voice : titleCase(voice))
+      : entry.label;
+    if (typeof entry !== 'string' && entry.url) option.dataset.voiceUrl = entry.url;
     if (voice === defaultVoice) option.selected = true;
     return option;
   }));
@@ -310,7 +458,7 @@ languageSelect.addEventListener('change', () => {
   maybeUpdateSampleText();
   updateVoiceOptions();
   updateLoadBtnLabel();
-  if (engineSelect.value === 'idle') resetWorkerForEngine();
+  if (engineSelect.value === 'idle' || engineSelect.value.startsWith('phonon')) resetWorkerForEngine();
 });
 quantSelect.addEventListener('change', updateLoadBtnLabel);
 updateLoadBtnLabel();
@@ -444,13 +592,13 @@ function createWorker() {
     log(`Error: ${currentEngine} worker failed to start: ${detail}`);
     loadBtn.disabled = false;
     engineSelect.disabled = false;
-    quantSelect.disabled = currentEngine !== 'xn';
+    quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
   };
   worker.onmessageerror = () => {
     log(`Error: ${currentEngine} worker sent an unreadable message.`);
     loadBtn.disabled = false;
     engineSelect.disabled = false;
-    quantSelect.disabled = currentEngine !== 'xn';
+    quantSelect.disabled = !ENGINE_INFO[currentEngine]?.quantOptions;
   };
 }
 
@@ -470,6 +618,8 @@ function resetWorkerForEngine() {
   quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
   languageSection.style.display = ENGINE_INFO[selectedEngine]?.languages ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
+  temperatureSection.style.display = selectedEngine === 'pivo' ? 'none' : '';
+  speedSection.style.display = selectedEngine === 'pivo' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
   createWorker();
@@ -530,7 +680,9 @@ function handleWorkerMessage(e) {
       break;
 
     case 'gen_start':
-      log(`Generating speech (${data.numTokens} tokens)...`);
+      log(data.numTokens == null
+        ? 'Generating streaming speech...'
+        : `Generating speech (${data.numTokens} tokens)...`);
       break;
 
     case 'chunk': {
@@ -604,7 +756,8 @@ function handleWorkerMessage(e) {
 }
 
 function handleOrtBlobEngineMessage(data) {
-  const engineLabel = currentEngine === 'kokoro' ? 'Kokoro 82M ORT' : 'Supertonic 3 ORT';
+  const engineLabel = ENGINE_INFO[currentEngine]?.label
+    || (currentEngine === 'kokoro' ? 'Kokoro 82M ORT' : 'Supertonic 3 ORT');
   switch (data.status) {
     case 'ready':
       clearCacheBtn.disabled = false;
@@ -628,7 +781,9 @@ function handleOrtBlobEngineMessage(data) {
       {
         const langLine = currentEngine === 'supertonic'
           ? `\nLanguage: ${languageSelect.options[languageSelect.selectedIndex].text}\nSteps: ${stepsSelect.value}`
-          : '';
+          : currentEngine === 'pivo'
+            ? `\nVoice: ${voiceSelect.value}\nSpeed: ${Number(speedSlider.value).toFixed(1)}×`
+            : '';
         const quantLine = data.dtype ? `\nQuantization: ${data.dtype}` : '';
         log(`Ready! Enter text and click Generate.\nEngine: ${engineLabel} (${data.backend?.toUpperCase() || 'WASM'})${quantLine}${langLine}`);
       }
@@ -637,7 +792,10 @@ function handleOrtBlobEngineMessage(data) {
       hideProgress();
       const totalMs = performance.now() - startTime;
       const durationLine = data.durationSec ? ` (${data.durationSec.toFixed(2)}s audio)` : '';
-      log(`Generated ${engineLabel} audio in ${(totalMs / 1000).toFixed(2)}s${durationLine}.`);
+      const unknownLine = data.unknownWords?.length
+        ? `\nSpelled unknown words: ${data.unknownWords.join(', ')}`
+        : '';
+      log(`Generated ${engineLabel} audio in ${(totalMs / 1000).toFixed(2)}s${durationLine}.${unknownLine}`);
       const container = document.getElementById('audio-container');
       container.innerHTML = '';
       const audio = document.createElement('audio');
@@ -697,10 +855,13 @@ function concatenateChunks(chunks) {
 
 function loadWeights() {
   if (!worker) createWorker();
+  const engine = ENGINE_INFO[currentEngine];
   loadBtn.disabled = true;
   engineSelect.disabled = true;
   quantSelect.disabled = true;
-  if (currentEngine === 'supertonic') {
+  if (currentEngine === 'pivo') {
+    worker.postMessage({ command: 'load' });
+  } else if (currentEngine === 'supertonic') {
     worker.postMessage({
       command: 'load',
       backend: 'wasm',
@@ -718,15 +879,18 @@ function loadWeights() {
     worker.postMessage({
       type: 'load',
       voiceName: voiceSelect.value,
+      voiceUrl: voiceSelect.options[voiceSelect.selectedIndex]?.dataset.voiceUrl,
       quant: quantSelect.value,
-      language: currentEngine === 'idle' ? languageSelect.value : undefined,
+      language: engine?.languages ? languageSelect.value : undefined,
+      model: engine?.models?.[languageSelect.value] || engine?.model,
+      engineLabel: engine?.label,
     });
   }
 }
 
 function clearCache() {
   clearCacheBtn.disabled = true;
-  if (currentEngine === 'supertonic' || currentEngine === 'kokoro') {
+  if (currentEngine === 'supertonic' || currentEngine === 'kokoro' || currentEngine === 'pivo') {
     worker.postMessage({ command: 'clear-cache' });
   } else {
     worker.postMessage({ type: 'clear_cache' });
@@ -753,7 +917,14 @@ function generate() {
   analyser.connect(audioCtx.destination);
   startVisualizer();
 
-  if (currentEngine === 'supertonic') {
+  if (currentEngine === 'pivo') {
+    worker.postMessage({
+      command: 'tts',
+      text,
+      voice: voiceSelect.value,
+      speed: Number(speedSlider.value),
+    });
+  } else if (currentEngine === 'supertonic') {
     worker.postMessage({
       command: 'tts',
       text,
@@ -779,6 +950,7 @@ function generate() {
       type: 'generate',
       text,
       voiceName: voiceSelect.value,
+      voiceUrl: voiceSelect.options[voiceSelect.selectedIndex]?.dataset.voiceUrl,
       temperature: parseFloat(tempSlider.value),
     });
   }
@@ -829,6 +1001,7 @@ btn.addEventListener('click', generate);
 updateQuantOptions();
 updateLanguageOptions();
 updateVoiceOptions();
+maybeUpdateSampleText();
 resetWorkerForEngine();
 
 // Start the render loop (draws empty bars until audio plays)
