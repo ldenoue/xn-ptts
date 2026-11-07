@@ -58,6 +58,13 @@ are exposed in the UI for q4f16 and q4. The Kokoro browser path currently
 exposes the English US/UK voices supported by `kokoro-js`; Supertonic also has
 a multilingual language selector.
 
+Underdog Woof is also available as an optional WebGPU-only engine. Its ~31.7 MB
+one-voice model is loaded from
+[`ldenoue/Underdog-Woof-WebGPU`](https://huggingface.co/ldenoue/Underdog-Woof-WebGPU),
+not GitHub Pages. The upstream runtime and its license/NOTICE are preserved in
+`www/woof-runtime/`. Woof is restricted to non-commercial use unless separately
+licensed and requires the visible “Voice by Underdog Woof” attribution.
+
 ## Todo
 
 - Handle long prompts, see `split_into_best_sentences` in

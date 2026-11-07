@@ -8,8 +8,8 @@ load the weights, and generate speech entirely in your browser.
 `xn-ptts` is a Rust implementation of
 [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) built on
 [`xn`](https://github.com/LaurentMazare/xn). The web demo also makes it easy to
-compare Pocket TTS backends with Phonon 31m/40m, PiVo 1.4M, Supertonic 3,
-and Kokoro 82M.
+compare Pocket TTS backends with Phonon 31m/40m, PiVo 1.4M, Underdog Woof,
+Supertonic 3, and Kokoro 82M.
 
 ## Why try the demo?
 
@@ -29,6 +29,7 @@ and Kokoro 82M.
 | **Phonon 40m q8** | English, French, German, Spanish, Portuguese | ~75 MB per language | Separate streaming checkpoint per language; CC BY-NC 4.0 |
 | **Phonon 40m multilingual q8** | English, French, German, Spanish, Portuguese | ~75 MB | One multilingual Phonon checkpoint; CC BY-NC 4.0 |
 | **[PiVo 1.4M ORT](https://github.com/ldenoue/PiVo-1.4M-web)** | English | ~9.4 MB | Two voices and adjustable speed; complete 16 kHz WAV output |
+| **[Underdog Woof WebGPU](https://underdog.ai/woof)** | English | ~31.7 MB | One Isla voice; streaming 24 kHz audio; WebGPU and non-commercial use only |
 | **Candle Q8_0 multilingual** | English, French, German, Spanish, Portuguese, Italian | ~142 MB per language, including the selected voice | Based on [`idle-intelligence/tts-web`](https://github.com/idle-intelligence/tts-web); 26 voices available on demand |
 | **Supertonic 3 ORT** | Arabic, English, French, German, Portuguese, Italian, Spanish | ~401 MB | Multilingual ONNX Runtime Web engine |
 | **Kokoro 82M ORT** | English (US and UK voices) | ~93 MB | `kokoro-js` with q8, q4f16, and q4 choices |
@@ -49,6 +50,13 @@ PiVo uses the browser implementation from
 [`ldenoue/PiVo-1.4M-web`](https://github.com/ldenoue/PiVo-1.4M-web). Its model,
 CMU dictionary, and upstream license notices are bundled under
 `ptts-wasm/www/pivo-model/`.
+
+Woof uses Underdog's one-voice WebGPU runtime. Its unchanged model files are
+served from the attributed
+[`ldenoue/Underdog-Woof-WebGPU`](https://huggingface.co/ldenoue/Underdog-Woof-WebGPU)
+mirror rather than GitHub Pages. Woof requires visible attribution and is
+restricted to non-commercial use unless separately licensed; its license and
+NOTICE are preserved under `ptts-wasm/www/woof-runtime/`.
 
 The gated 40m checkpoints are served to the browser from attributed, q8-only
 public mirrors under [`ldenoue`](https://huggingface.co/ldenoue). Their pinned
@@ -108,8 +116,10 @@ This project builds on
 [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts),
 [`xn`](https://github.com/LaurentMazare/xn),
 [`phonon-tts`](https://github.com/gradium-ai/xn-ptts#browser),
-[`PiVo`](https://huggingface.co/empero-ai/PiVo-1.4M) by Empero Research, and
+[`PiVo`](https://huggingface.co/empero-ai/PiVo-1.4M) by Empero Research,
+[`Underdog Woof`](https://underdog.ai/woof), and
 [`idle-intelligence/tts-web`](https://github.com/idle-intelligence/tts-web).
-The repository is available under MIT or Apache 2.0. The bundled Idle
+The repository's original code is available under MIT or Apache 2.0; bundled
+third-party components remain under their own licenses. The bundled Idle
 Intelligence WASM license is preserved in
 [`ptts-wasm/IDLE_TTS_WEB_LICENSE`](ptts-wasm/IDLE_TTS_WEB_LICENSE).

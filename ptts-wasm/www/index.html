@@ -37,7 +37,7 @@
 <body>
 
 <h1>Tiny TTS Browser Lab</h1>
-<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device.</p>
+<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://underdog.ai/woof" target="_blank">Underdog Woof</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device. Voice by <a href="https://underdog.ai" target="_blank">Underdog Woof</a>.</p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -53,6 +53,7 @@
       <option value="phonon40">Phonon 40m q8</option>
       <option value="phonon40multi">Phonon 40m multilingual q8</option>
       <option value="pivo">PiVo 1.4M ORT</option>
+      <option value="woof">Underdog Woof WebGPU</option>
       <option value="idle">Candle Q8_0 multilingual (134 MB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
       <option value="kokoro">Kokoro 82M ORT</option>
@@ -280,6 +281,16 @@ const ENGINE_INFO = {
     defaultVoices: { en: 'Pi' },
     voices: ['Pi', 'Vo'],
   },
+  woof: {
+    label: 'Underdog Woof WebGPU',
+    worker: 'woof_worker.js?v=woof-webgpu-1',
+    type: 'module',
+    modelSizeMb: { q8: 32 },
+    voiceSizeMb: 0,
+    defaultQuant: 'q8',
+    defaultVoice: 'isla',
+    voices: [{ value: 'isla', label: 'Isla — Voice by Underdog Woof' }],
+  },
   idle: {
     worker: 'idle_worker.js?v=idle-candle-multilingual-v2',
     type: 'module',
@@ -353,6 +364,7 @@ const SAMPLE_TEXT = {
   phonon: 'Hello from Phonon, running entirely in your browser.',
   phonon40: 'Hello from Phonon 40m, streaming speech locally in your browser.',
   pivo: 'Hello from Pi Vo, a tiny 1.4 million parameter voice running in your browser.',
+  woof: 'Call 020 7946 0018 before 6:15.',
   ar: 'هذا اختبار لنظام تحويل النص إلى كلام، يوضح جودة صوت رائعة باستخدام مئة مليون معامل فقط.',
   fr: 'Ceci est un test du système de synthèse vocale, qui montre un son excellent avec seulement cent millions de paramètres.',
   de: 'Dies ist ein Test des Text-zu-Sprache-Systems und zeigt großartigen Klang mit nur hundert Millionen Parametern.',
@@ -368,7 +380,7 @@ function isSampleText(value) {
 function maybeUpdateSampleText() {
   if (!isSampleText(textInput.value)) return;
   const selectedLanguage = languageSelect.options[languageSelect.selectedIndex];
-  const lang = selectedLanguage?.dataset.sample || 'en';
+  const lang = engineSelect.value === 'woof' ? 'woof' : selectedLanguage?.dataset.sample || 'en';
   textInput.value = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
 }
 
@@ -433,6 +445,7 @@ function updateVoiceOptions() {
   const engine = ENGINE_INFO[engineSelect.value] ?? ENGINE_INFO.xn;
   const voices = engine.voicesByLanguage?.[languageSelect.value] || engine.voices;
   const defaultVoice = engine.defaultVoices?.[languageSelect.value]
+    || engine.defaultVoice
     || (engineSelect.value === 'supertonic' ? 'F5' : engineSelect.value === 'kokoro' ? 'af_heart' : 'alba');
   voiceSelect.replaceChildren(...voices.map((entry) => {
     const voice = typeof entry === 'string' ? entry : entry.value;
@@ -618,7 +631,7 @@ function resetWorkerForEngine() {
   quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
   languageSection.style.display = ENGINE_INFO[selectedEngine]?.languages ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
-  temperatureSection.style.display = selectedEngine === 'pivo' ? 'none' : '';
+  temperatureSection.style.display = selectedEngine === 'pivo' || selectedEngine === 'woof' ? 'none' : '';
   speedSection.style.display = selectedEngine === 'pivo' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
