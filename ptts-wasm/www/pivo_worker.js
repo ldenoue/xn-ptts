@@ -1,5 +1,5 @@
 import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/ort.wasm.min.mjs';
-import { phonemize, SPECIAL } from './pivo_frontend.js';
+import { phonemize, SPECIAL } from './pivo_frontend.js?v=pivo-hf-1';
 
 const ORT_ROOT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist';
 const ortRuntimeUrl = `${ORT_ROOT}/ort-wasm-simd-threaded.mjs`;
@@ -9,7 +9,8 @@ ort.env.wasm.numThreads = 1;
 ort.env.wasm.proxy = false;
 ort.env.wasm.wasmPaths = { mjs: ortRuntimeUrl, wasm: ortWasmUrl };
 
-const MODEL_ROOT = new URL('./pivo-model/onnx', self.location.href).href;
+const PIVO_REVISION = '515d84fc3420da6ae138f1b81017fcbc24d622a8';
+const MODEL_ROOT = `https://huggingface.co/empero-ai/PiVo-1.4M/resolve/${PIVO_REVISION}/onnx`;
 const VOICES = { Pi: 0, Vo: 1 };
 const CONFIG = { width: 96, heads: 4, kvHeads: 2, maxTokenFrames: 200, maxUtteranceFrames: 3000 };
 const CACHE_NAMES = ['key0', 'value0', 'key1', 'value1'];

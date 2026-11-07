@@ -51,6 +51,11 @@ checked-in WASM artifacts were built from upstream revision
 `4ac4680af1dbe02dfbc78bf85f51e8523d614caf`; see
 [`IDLE_TTS_WEB_LICENSE`](IDLE_TTS_WEB_LICENSE) for its MIT license.
 
+PiVo's ~9.4 MB of ONNX graphs and pronunciation data are loaded directly from
+a pinned revision of the official
+[`empero-ai/PiVo-1.4M`](https://huggingface.co/empero-ai/PiVo-1.4M) repository
+instead of the GitHub Pages deployment.
+
 The other optional engines use ONNX Runtime for Supertonic 3 and Kokoro 82M.
 Kokoro runs through `kokoro-js` on the WASM backend and defaults to the q8 ONNX
 weights (~92 MB plus the selected voice). Additional Kokoro quantized choices

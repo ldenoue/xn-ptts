@@ -9,7 +9,9 @@ const ORDINALS = { one: 'first', two: 'second', three: 'third', five: 'fifth', e
 const MONTHS = 'January February March April May June July August September October November December'.split(' ');
 
 let lexiconPromise;
-const LEXICON_URL = new URL('./pivo-model/cmudict.dict', import.meta.url);
+const PIVO_REVISION = '515d84fc3420da6ae138f1b81017fcbc24d622a8';
+const LEXICON_URL =
+  `https://huggingface.co/empero-ai/PiVo-1.4M/resolve/${PIVO_REVISION}/pivo/resources/cmudict.dict`;
 
 function cardinal(number) {
   if (number < 0) return `minus ${cardinal(-number)}`;

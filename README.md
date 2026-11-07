@@ -47,9 +47,10 @@ catalog. Catalog voices are downloaded on demand and work with every Phonon
 checkpoint.
 
 PiVo uses the browser implementation from
-[`ldenoue/PiVo-1.4M-web`](https://github.com/ldenoue/PiVo-1.4M-web). Its model,
-CMU dictionary, and upstream license notices are bundled under
-`ptts-wasm/www/pivo-model/`.
+[`ldenoue/PiVo-1.4M-web`](https://github.com/ldenoue/PiVo-1.4M-web). Its model
+and CMU dictionary are loaded from a pinned revision of the official
+[`empero-ai/PiVo-1.4M`](https://huggingface.co/empero-ai/PiVo-1.4M) repository;
+upstream license notices are preserved under `ptts-wasm/www/pivo-model/`.
 
 Woof uses Underdog's one-voice WebGPU runtime. Its unchanged model files are
 served from the attributed
