@@ -37,7 +37,7 @@
 <body>
 
 <h1>Tiny TTS Browser Lab</h1>
-<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://underdog.ai/woof" target="_blank">Underdog Woof</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device. Voice by <a href="https://underdog.ai" target="_blank">Underdog Woof</a>.</p>
+<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://tiny-voca.n4ze3m.com/" target="_blank">tiny-voca 4.5M</a>, <a href="https://underdog.ai/woof" target="_blank">Underdog Woof</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device. Voice by <a href="https://underdog.ai" target="_blank">Underdog Woof</a>.</p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -53,6 +53,7 @@
       <option value="phonon40">Phonon 40m q8</option>
       <option value="phonon40multi">Phonon 40m multilingual q8</option>
       <option value="pivo">PiVo 1.4M ORT</option>
+      <option value="tinyvoca">tiny-voca 4.5M ORT</option>
       <option value="woof">Underdog Woof WebGPU</option>
       <option value="idle">Candle Q8_0 multilingual (134 MB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
@@ -281,6 +282,19 @@ const ENGINE_INFO = {
     defaultVoices: { en: 'Pi' },
     voices: ['Pi', 'Vo'],
   },
+  tinyvoca: {
+    label: 'tiny-voca 4.5M ORT',
+    worker: 'tiny_voca_worker.js?v=tiny-voca-e5f9b11-2',
+    type: 'classic',
+    modelSizeMb: { f32: 27 },
+    voiceSizeMb: 0,
+    defaultQuant: 'f32',
+    defaultVoice: 'M2',
+    voices: [
+      { value: 'F2', label: 'F2 (US female)' },
+      { value: 'M2', label: 'M2 (US male)' },
+    ],
+  },
   woof: {
     label: 'Underdog Woof WebGPU',
     worker: 'woof_worker.js?v=woof-webgpu-1',
@@ -364,6 +378,7 @@ const SAMPLE_TEXT = {
   phonon: 'Hello from Phonon, running entirely in your browser.',
   phonon40: 'Hello from Phonon 40m, streaming speech locally in your browser.',
   pivo: 'Hello from Pi Vo, a tiny 1.4 million parameter voice running in your browser.',
+  tinyvoca: 'Hello! This is tiny voca, a small text to speech model running entirely in your browser.',
   woof: 'Call 020 7946 0018 before 6:15.',
   ar: 'هذا اختبار لنظام تحويل النص إلى كلام، يوضح جودة صوت رائعة باستخدام مئة مليون معامل فقط.',
   fr: 'Ceci est un test du système de synthèse vocale, qui montre un son excellent avec seulement cent millions de paramètres.',
@@ -380,7 +395,9 @@ function isSampleText(value) {
 function maybeUpdateSampleText() {
   if (!isSampleText(textInput.value)) return;
   const selectedLanguage = languageSelect.options[languageSelect.selectedIndex];
-  const lang = engineSelect.value === 'woof' ? 'woof' : selectedLanguage?.dataset.sample || 'en';
+  const lang = ['woof', 'tinyvoca'].includes(engineSelect.value)
+    ? engineSelect.value
+    : selectedLanguage?.dataset.sample || 'en';
   textInput.value = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
 }
 
@@ -631,8 +648,8 @@ function resetWorkerForEngine() {
   quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
   languageSection.style.display = ENGINE_INFO[selectedEngine]?.languages ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
-  temperatureSection.style.display = selectedEngine === 'pivo' || selectedEngine === 'woof' ? 'none' : '';
-  speedSection.style.display = selectedEngine === 'pivo' ? '' : 'none';
+  temperatureSection.style.display = ['pivo', 'woof', 'tinyvoca'].includes(selectedEngine) ? 'none' : '';
+  speedSection.style.display = selectedEngine === 'pivo' || selectedEngine === 'tinyvoca' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
   createWorker();
@@ -735,8 +752,8 @@ function handleWorkerMessage(e) {
         `Generated ${duration}s of audio in ${totalTime}s (RTF=${rtf}, first audio: ${firstAudio}s)`,
         `Text prompt: ${promptMs}ms`,
         `Decode steps: ${data.numSteps ?? 0}, avg ${avgMs}ms (min ${minMs}, max ${maxMs})`,
-        formatFeatures(cpuFeatures),
-      ].join('\n');
+        Object.keys(cpuFeatures).length ? formatFeatures(cpuFeatures) : null,
+      ].filter(Boolean).join('\n');
       log(stats);
 
       // Create WAV download/replay element
@@ -965,6 +982,7 @@ function generate() {
       voiceName: voiceSelect.value,
       voiceUrl: voiceSelect.options[voiceSelect.selectedIndex]?.dataset.voiceUrl,
       temperature: parseFloat(tempSlider.value),
+      speed: Number(speedSlider.value),
     });
   }
 }

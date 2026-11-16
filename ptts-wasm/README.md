@@ -56,6 +56,14 @@ a pinned revision of the official
 [`empero-ai/PiVo-1.4M`](https://huggingface.co/empero-ai/PiVo-1.4M) repository
 instead of the GitHub Pages deployment.
 
+tiny-voca's ~21.4 MB ONNX model and ~5.4 MB pronunciation data are loaded from
+a pinned revision of the official
+[`n4ze3m/tiny-voca`](https://huggingface.co/n4ze3m/tiny-voca) repository. It
+uses the upstream Pyodide + ONNX Runtime Web path, exposes both American
+English voices and adjustable speed, and plays completed sentences while the
+rest of the text is generated. The 67 KB Dizione Python source archive and its
+Apache-2.0 provenance are preserved in `www/tiny-voca-runtime/`.
+
 The other optional engines use ONNX Runtime for Supertonic 3 and Kokoro 82M.
 Kokoro runs through `kokoro-js` on the WASM backend and defaults to the q8 ONNX
 weights (~92 MB plus the selected voice). Additional Kokoro quantized choices
