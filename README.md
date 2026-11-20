@@ -9,7 +9,7 @@ load the weights, and generate speech entirely in your browser.
 [Kyutai Pocket TTS](https://github.com/kyutai-labs/pocket-tts) built on
 [`xn`](https://github.com/LaurentMazare/xn). The web demo also makes it easy to
 compare Pocket TTS backends with Phonon 31m/40m, PiVo 1.4M, tiny-voca 4.5M,
-Underdog Woof, Supertonic 3, and Kokoro 82M.
+Underdog Woof, Kale TTS nano 7.5M, Supertonic 3, and Kokoro 82M.
 
 ## Why try the demo?
 
@@ -31,6 +31,7 @@ Underdog Woof, Supertonic 3, and Kokoro 82M.
 | **[PiVo 1.4M ORT](https://github.com/ldenoue/PiVo-1.4M-web)** | English | ~9.4 MB | Two voices and adjustable speed; complete 16 kHz WAV output |
 | **[tiny-voca 4.5M ORT](https://github.com/n4ze3m/tiny-voca)** | English | ~27 MB | Two voices, adjustable speed, sentence-by-sentence 24 kHz playback; Apache-2.0 |
 | **[Underdog Woof WebGPU](https://underdog.ai/woof)** | English | ~31.7 MB | One Isla voice; streaming 24 kHz audio; WebGPU and non-commercial use only |
+| **[Kale TTS nano 7.5M ORT](https://huggingface.co/KaleComputer/kale-tts-1-nano)** | English (US and UK voices) | ~20 MB | Nano INT8 graph only; ten synthetic voices; 24 kHz output; Apache-2.0 |
 | **Candle Q8_0 multilingual** | English, French, German, Spanish, Portuguese, Italian | ~142 MB per language, including the selected voice | Based on [`idle-intelligence/tts-web`](https://github.com/idle-intelligence/tts-web); 26 voices available on demand |
 | **Supertonic 3 ORT** | Arabic, English, French, German, Portuguese, Italian, Spanish | ~401 MB | Multilingual ONNX Runtime Web engine |
 | **Kokoro 82M ORT** | English (US and UK voices) | ~93 MB | `kokoro-js` with q8, q4f16, and q4 choices |
@@ -66,6 +67,11 @@ served from the attributed
 mirror rather than GitHub Pages. Woof requires visible attribution and is
 restricted to non-commercial use unless separately licensed; its license and
 NOTICE are preserved under `ptts-wasm/www/woof-runtime/`.
+
+Kale uses the official `kale-tts` browser API and the 7.5M-parameter nano
+INT8 ONNX graph. The model, pronunciation front end, and selected synthetic
+voice are fetched from the official Kale Space and retained in the browser's
+Cache API. The 45.7M-parameter tiny model and nano FP32 graph are not loaded.
 
 The gated 40m checkpoints are served to the browser from attributed, q8-only
 public mirrors under [`ldenoue`](https://huggingface.co/ldenoue). Their pinned
@@ -127,7 +133,8 @@ This project builds on
 [`phonon-tts`](https://github.com/gradium-ai/xn-ptts#browser),
 [`PiVo`](https://huggingface.co/empero-ai/PiVo-1.4M) by Empero Research,
 [`tiny-voca`](https://github.com/n4ze3m/tiny-voca) by Muhammed Nazeem,
-[`Underdog Woof`](https://underdog.ai/woof), and
+[`Underdog Woof`](https://underdog.ai/woof),
+[`Kale TTS`](https://huggingface.co/KaleComputer/kale-tts-1-nano), and
 [`idle-intelligence/tts-web`](https://github.com/idle-intelligence/tts-web).
 The repository's original code is available under MIT or Apache 2.0; bundled
 third-party components remain under their own licenses. The bundled Idle

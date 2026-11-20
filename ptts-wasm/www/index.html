@@ -37,7 +37,7 @@
 <body>
 
 <h1>Tiny TTS Browser Lab</h1>
-<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://tiny-voca.n4ze3m.com/" target="_blank">tiny-voca 4.5M</a>, <a href="https://underdog.ai/woof" target="_blank">Underdog Woof</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device. Voice by <a href="https://underdog.ai" target="_blank">Underdog Woof</a>.</p>
+<p class="subtitle">Compare small, on-device text-to-speech models running locally in your browser: <a href="https://github.com/kyutai-labs/pocket-tts" target="_blank">Pocket TTS</a> through <a href="https://github.com/LaurentMazare/xn" target="_blank">xn</a> and <a href="https://github.com/idle-intelligence/tts-web" target="_blank">tts-web</a>, <a href="https://github.com/gradium-ai/xn-ptts#browser" target="_blank">Gradium Phonon</a>, <a href="https://github.com/ldenoue/PiVo-1.4M-web" target="_blank">PiVo 1.4M</a>, <a href="https://tiny-voca.n4ze3m.com/" target="_blank">tiny-voca 4.5M</a>, <a href="https://underdog.ai/woof" target="_blank">Underdog Woof</a>, <a href="https://huggingface.co/KaleComputer/kale-tts-1-nano" target="_blank">Kale TTS nano 7.5M</a>, <a href="https://huggingface.co/Supertone/supertonic-3" target="_blank">Supertonic 3</a>, and <a href="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX" target="_blank">Kokoro 82M</a>. Your text and generated audio stay on this device. Voice by <a href="https://underdog.ai" target="_blank">Underdog Woof</a>.</p>
 
 <div class="section">
   <label for="text">Text to speak</label>
@@ -55,6 +55,7 @@
       <option value="pivo">PiVo 1.4M ORT</option>
       <option value="tinyvoca">tiny-voca 4.5M ORT</option>
       <option value="woof">Underdog Woof WebGPU</option>
+      <option value="kale">Kale TTS nano 7.5M ORT</option>
       <option value="idle">Candle Q8_0 multilingual (134 MB)</option>
       <option value="supertonic">Supertonic 3 ORT</option>
       <option value="kokoro">Kokoro 82M ORT</option>
@@ -305,6 +306,27 @@ const ENGINE_INFO = {
     defaultVoice: 'isla',
     voices: [{ value: 'isla', label: 'Isla — Voice by Underdog Woof' }],
   },
+  kale: {
+    label: 'Kale TTS nano 7.5M ORT',
+    worker: 'kale_ort_worker.js?v=kale-nano-1',
+    type: 'module',
+    modelSizeMb: { int8: 20 },
+    voiceSizeMb: 0,
+    defaultQuant: 'int8',
+    defaultVoice: 's057b',
+    voices: [
+      { value: 's057b', label: 'Kenzie (US female)' },
+      { value: 'f06', label: 'Simone (US female)' },
+      { value: 'd03', label: 'Amy (UK female)' },
+      { value: 'w165', label: 'Frankie (US female)' },
+      { value: 'w602', label: 'Darlene (US female)' },
+      { value: 'm3', label: 'Owen (US male)' },
+      { value: 't071', label: 'Toby (US male)' },
+      { value: 'd13', label: 'Jack (UK male)' },
+      { value: 'x328', label: 'Earl (US male)' },
+      { value: 'h013f', label: 'Magnus (US male)' },
+    ],
+  },
   idle: {
     worker: 'idle_worker.js?v=idle-candle-multilingual-v2',
     type: 'module',
@@ -380,6 +402,7 @@ const SAMPLE_TEXT = {
   pivo: 'Hello from Pi Vo, a tiny 1.4 million parameter voice running in your browser.',
   tinyvoca: 'Hello! This is tiny voca, a small text to speech model running entirely in your browser.',
   woof: 'Call 020 7946 0018 before 6:15.',
+  kale: 'Hello from Kale TTS nano, a tiny 7.5 million parameter voice running in your browser.',
   ar: 'هذا اختبار لنظام تحويل النص إلى كلام، يوضح جودة صوت رائعة باستخدام مئة مليون معامل فقط.',
   fr: 'Ceci est un test du système de synthèse vocale, qui montre un son excellent avec seulement cent millions de paramètres.',
   de: 'Dies ist ein Test des Text-zu-Sprache-Systems und zeigt großartigen Klang mit nur hundert Millionen Parametern.',
@@ -395,7 +418,7 @@ function isSampleText(value) {
 function maybeUpdateSampleText() {
   if (!isSampleText(textInput.value)) return;
   const selectedLanguage = languageSelect.options[languageSelect.selectedIndex];
-  const lang = ['woof', 'tinyvoca'].includes(engineSelect.value)
+  const lang = ['woof', 'tinyvoca', 'kale'].includes(engineSelect.value)
     ? engineSelect.value
     : selectedLanguage?.dataset.sample || 'en';
   textInput.value = SAMPLE_TEXT[lang] || SAMPLE_TEXT.en;
@@ -648,7 +671,7 @@ function resetWorkerForEngine() {
   quantSelect.parentElement.style.display = ENGINE_INFO[selectedEngine]?.quantOptions ? '' : 'none';
   languageSection.style.display = ENGINE_INFO[selectedEngine]?.languages ? '' : 'none';
   stepsSection.style.display = selectedEngine === 'supertonic' ? '' : 'none';
-  temperatureSection.style.display = ['pivo', 'woof', 'tinyvoca'].includes(selectedEngine) ? 'none' : '';
+  temperatureSection.style.display = ['pivo', 'woof', 'tinyvoca', 'kale'].includes(selectedEngine) ? 'none' : '';
   speedSection.style.display = selectedEngine === 'pivo' || selectedEngine === 'tinyvoca' ? '' : 'none';
   hideProgress();
   log('Select an engine and load weights.');
@@ -905,6 +928,8 @@ function loadWeights() {
       voice: voiceSelect.value,
       dtype: quantSelect.value,
     });
+  } else if (currentEngine === 'kale') {
+    worker.postMessage({ command: 'load', voice: voiceSelect.value });
   } else {
     worker.postMessage({
       type: 'load',
@@ -920,7 +945,7 @@ function loadWeights() {
 
 function clearCache() {
   clearCacheBtn.disabled = true;
-  if (currentEngine === 'supertonic' || currentEngine === 'kokoro' || currentEngine === 'pivo') {
+  if (currentEngine === 'supertonic' || currentEngine === 'kokoro' || currentEngine === 'pivo' || currentEngine === 'kale') {
     worker.postMessage({ command: 'clear-cache' });
   } else {
     worker.postMessage({ type: 'clear_cache' });
@@ -973,6 +998,13 @@ function generate() {
       backend: 'wasm',
       dtype: quantSelect.value,
       speed: 1,
+      requestId: `${Date.now()}`,
+    });
+  } else if (currentEngine === 'kale') {
+    worker.postMessage({
+      command: 'tts',
+      text,
+      voice: voiceSelect.value,
       requestId: `${Date.now()}`,
     });
   } else {
